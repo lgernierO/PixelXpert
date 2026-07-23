@@ -152,6 +152,7 @@ public class StatusbarMods extends XposedModPack {
 	private LinearLayout mLeftExtraRowContainer;
 	private static float SBPaddingStart = 0, SBPaddingEnd = 0;
 	private FrameLayout mPhoneStatusbarView;
+	private boolean mModernStatusBar;
 
 	//endregion
 
@@ -461,6 +462,8 @@ public class StatusbarMods extends XposedModPack {
 
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
+		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
+		mModernStatusBar = StatusBarRootFactoryClass.getClazz() != null;
 		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 		ReflectedClass NotificationIconContainerClass = ReflectedClass.of("com.android.systemui.statusbar.phone.NotificationIconContainer");
 		ReflectedClass TunerServiceImplClass = ReflectedClass.of("com.android.systemui.tuner.TunerServiceImpl");
@@ -850,8 +853,15 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private void repositionOngoingChip() {
+		// New SystemUI puts the clock and the ongoing-activity chip in the same
+		// StatusBarRoot ComposeView. Moving that view into the notification row
+		// makes the clock disappear whenever the row is GONE. Leave the modern
+		// host in its original start-side container.
+		if (mModernStatusBar) return;
 		View ongoingChipComposeView = findComposeView(mPhoneStatusbarView.findViewById(idOf("status_bar_start_side_except_heads_up")));
-		reAddView(mNotificationContainerContainer, ongoingChipComposeView);
+		if (ongoingChipComposeView != null) {
+			reAddView(mNotificationContainerContainer, ongoingChipComposeView);
+		}
 	}
 
 	private View findComposeView(ViewGroup parent) {
@@ -1102,6 +1112,11 @@ public class StatusbarMods extends XposedModPack {
 
 	//region clock and date related
 	private void placeClock() {
+		if (mClockView == null) return;
+		// The Android 17 Compose status bar renders the left clock from the
+		// StatusBarRoot host. The legacy Clock view is only a compatibility
+		// anchor, so do not detach/reinsert it for the default left position.
+		if (mModernStatusBar && clockPosition == POSITION_LEFT && !notificationAreaMultiRow) return;
 		ViewGroup parent = (ViewGroup) mClockView.getParent();
 		ViewGroup targetArea = null;
 		Integer index = null;

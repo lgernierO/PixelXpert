@@ -28,14 +28,14 @@ jobs:
 
     - name: Source Code Download (manual branch build)
       if: github.event_name == 'workflow_dispatch'
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7.0.1
       with:
         ref: ${{ inputs.ref }}
         submodules: recursive
         fetch-depth: 0
       
     - name: JDK 21 Setup
-      uses: actions/setup-java@v5.2.0
+      uses: actions/setup-java@v5.6.0
       with:
         java-version: '21'
         distribution: 'jetbrains'
@@ -99,17 +99,3 @@ jobs:
         files: MagiskModBase/module.prop version.properties latestVersion.json CanaryChangelog.md latestCanary.json MagiskModuleUpdate_Xposed.json MagiskModuleUpdate_Full.json
         name: GitHub
         email: PixelXpert@siava.sh
-
-    - name: Telegram Channel Post
-      if: github.event_name == 'push'
-      uses: appleboy/telegram-action@master
-      with:
-        to: ${{ secrets.AOSPMODS_CHANNEL_ID }}
-        token: ${{ secrets.TELEGRAM_TOKEN }}
-        message: ${{ env.TMessage }}
-        format: markdown
-
-    - name: Telegram File Attachment
-      if: github.event_name == 'push'
-      run: |
-        curl -v "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMediaGroup?chat_id=${{ secrets.AOSPMODS_CHANNEL_ID }}&media=%5B%7B%22type%22%3A%22document%22%2C%20%22media%22%3A%22attach%3A%2F%2FXposed%22%7D%5D" -F Xposed="@output/PixelXpert.zip"

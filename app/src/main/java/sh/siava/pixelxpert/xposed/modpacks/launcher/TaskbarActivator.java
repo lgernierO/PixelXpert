@@ -49,6 +49,17 @@ public class TaskbarActivator extends XposedModPack {
 	private Object mCurrentTopTask;
 	private Object mDeviceProfile;
 
+	private static Object getFieldCompat(Object object, String... names) {
+		if (object == null) return null;
+		for (String name : names) {
+			try {
+				return getObjectField(object, name);
+			} catch (Throwable ignored) {
+			}
+		}
+		return null;
+	}
+
 	public TaskbarActivator(Context context) {
 		super(context);
 	}
@@ -115,23 +126,28 @@ public class TaskbarActivator extends XposedModPack {
 	@SuppressLint("DiscouragedApi")
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
-		ReflectedClass DeviceProfileBuilderClass = ReflectedClass.of("com.android.launcher3.DeviceProfile$Builder");
+		// Android 17 moved DeviceProfile.Builder into deviceprofile.DeviceProfileBuilder.
+		// Keep both paths because the same module is also used on older Launcher builds.
+		ReflectedClass LegacyDeviceProfileBuilderClass = ReflectedClass.ofIfPossible("com.android.launcher3.DeviceProfile$Builder");
+		ReflectedClass DeviceProfileBuilderClass = ReflectedClass.ofIfPossible("com.android.launcher3.deviceprofile.DeviceProfileBuilder");
 		ReflectedClass TaskbarActivityContextClass = ReflectedClass.of("com.android.launcher3.taskbar.TaskbarActivityContext");
 //		ReflectedClass LauncherModelClass = ReflectedClass.of("com.android.launcher3.LauncherModel");
 //		ReflectedClass LauncherModelFactoryClass = ReflectedClass.of("com.android.launcher3.LauncherModel_Factory");
 //		ReflectedClass BaseActivityClass = ReflectedClass.of("com.android.launcher3.BaseActivity");
-		ReflectedClass DisplayControllerInfoClass = ReflectedClass.of("com.android.launcher3.display.LauncherDisplayInfo");
+		ReflectedClass DisplayControllerInfoClass = ReflectedClass.ofIfPossible("com.android.launcher3.display.LauncherDisplayInfo");
 		ReflectedClass StateControllerClass = ReflectedClass.of("com.android.launcher3.taskbar.TaskbarLauncherStateController");
 		ReflectedClass AbstractNavButtonLayoutterClass = ReflectedClass.of("com.android.launcher3.taskbar.navbutton.AbstractNavButtonLayoutter");
 		ReflectedClass RecentAppsControllerClass = ReflectedClass.of("com.android.launcher3.taskbar.TaskbarRecentAppsController");
 		ReflectedClass QuickSwitchStateClass = ReflectedClass.of("com.android.launcher3.uioverrides.states.QuickSwitchState");
 		ReflectedClass TaskbarUiControllerClass = ReflectedClass.of("com.android.launcher3.taskbar.FallbackTaskbarUIController");
-		ReflectedClass TaskbarProfileClass = ReflectedClass.of("com.android.launcher3.deviceprofile.TaskbarProfile");
+		ReflectedClass TaskbarProfileClass = ReflectedClass.ofIfPossible("com.android.launcher3.deviceprofile.TaskbarProfile");
+		ReflectedClass TaskbarBackgroundRendererClass = ReflectedClass.ofIfPossible("com.android.launcher3.taskbar.TaskbarBackgroundRenderer");
 		ReflectedClass TaskbarOverlayDragLayerClass = ReflectedClass.of("com.android.launcher3.taskbar.overlay.TaskbarOverlayDragLayer");
 		ReflectedClass KeyboardQuickSwitchControllerClass = ReflectedClass.of("com.android.launcher3.taskbar.KeyboardQuickSwitchController");
 		ReflectedClass TaskbarViewClass = ReflectedClass.of("com.android.launcher3.taskbar.TaskbarView");
-		TopTaskTrackerClass = ReflectedClass.of("com.android.quickstep.TopTaskTracker");
+		TopTaskTrackerClass = ReflectedClass.ofIfPossible("com.android.quickstep.TopTaskTracker");
 		ReflectedClass DevicePropertiesClass = ReflectedClass.ofIfPossible("com.android.launcher3.deviceprofile.DeviceProperties");
+		ReflectedClass DevicePropertiesFactoryClass = ReflectedClass.ofIfPossible("com.android.launcher3.deviceprofile.DeviceProperties$Factory");
 		ReflectedClass TaskbarConfigurationClass = ReflectedClass.ofIfPossible("com.android.launcher3.deviceprofile.TaskbarConfiguration");
 
 		//3 button nav order on A15+
@@ -147,14 +163,14 @@ public class TaskbarActivator extends XposedModPack {
 					setObjectField(param.thisObject, "recentsButton", navButtonContainer.findViewById(idOf( ThreeButtonRight)));
 				});
 
-		//enable taskbar
-		DisplayControllerInfoClass
-				.before("isTablet")
-				.run(param -> {
-					if (taskbarMode == TASKBAR_DEFAULT) return;
-
-					param.setResult(taskbarMode == TASKBAR_ON);
-				});
+		//enable taskbar; isTablet() was replaced by isLargeScreen(WindowBounds).
+		ReflectionConsumer forceLargeScreen = param -> {
+			if (taskbarMode != TASKBAR_DEFAULT) {
+				param.setResult(taskbarMode == TASKBAR_ON);
+			}
+		};
+		DisplayControllerInfoClass.before("isTablet").run(forceLargeScreen);
+		DisplayControllerInfoClass.before("isLargeScreen").run(forceLargeScreen);
 
 		//enable taskbar
 		TaskbarConfigurationClass
@@ -165,14 +181,24 @@ public class TaskbarActivator extends XposedModPack {
 					}
 				});
 
-		//enable taskbar
-		DevicePropertiesClass
-				.afterConstruction()
-				.run(param -> {
-					if(taskbarMode == TASKBAR_ON) {
-						setObjectField(param.thisObject, "isPhone", false);
-					}
-				});
+		//enable taskbar. On the latest Launcher the factory fills these fields after
+		//the DeviceProperties constructor has returned, so hook the factory result too.
+		ReflectionConsumer forceTaskbarProperties = param -> {
+			if (taskbarMode != TASKBAR_ON || param.getResult() == null) return;
+			Object properties = param.getResult();
+			try { setObjectField(properties, "isPhone", false); } catch (Throwable ignored) {}
+			try { setObjectField(properties, "isLargeScreen", true); } catch (Throwable ignored) {}
+			Object configuration = getFieldCompat(properties, "taskbarConfiguration");
+			if (configuration != null) {
+				try { setObjectField(configuration, "isTaskbarPresent", true); } catch (Throwable ignored) {}
+			}
+		};
+		DevicePropertiesClass.afterConstruction().run(param -> {
+			if(taskbarMode == TASKBAR_ON) {
+				try { setObjectField(param.thisObject, "isPhone", false); } catch (Throwable ignored) {}
+			}
+		});
+		DevicePropertiesFactoryClass.after("createDeviceProperties").run(forceTaskbarProperties);
 
 
 		//workaround of taskbar recents overflow fails to capture touch events for no known reason
@@ -259,27 +285,36 @@ public class TaskbarActivator extends XposedModPack {
 		//endregion
 
 		//region recentbar
-		DeviceProfileBuilderClass
-				.after("build")
-				.run(param -> {
-					if (taskbarMode == TASKBAR_DEFAULT) return;
+		ReflectionConsumer deviceProfileConsumer = param -> {
+			if (taskbarMode == TASKBAR_ON) {
+				mDeviceProfile = param.getResult();
+			}
+		};
+		LegacyDeviceProfileBuilderClass.after("build").run(deviceProfileConsumer);
+		DeviceProfileBuilderClass.after("build").run(deviceProfileConsumer);
 
-					boolean taskbarEnabled = taskbarMode == TASKBAR_ON;
+		// TaskbarProfile.getHeight() became a final public field. Scaling the first
+		// constructor argument works on both the old and new profile layouts.
+		TaskbarProfileClass.beforeConstruction().run(param -> {
+			if (taskbarMode == TASKBAR_ON && taskbarHeightOverride != 1f
+					&& param.args.length > 0 && param.args[0] instanceof Integer) {
+				param.args[0] = Math.round((Integer) param.args[0] * taskbarHeightOverride);
+			}
+		});
+		TaskbarProfileClass.after("getHeight").run(param -> {
+			if(taskbarMode == TASKBAR_ON && taskbarHeightOverride != 1f) {
+				param.setResult(Math.round((int)param.getResult() * taskbarHeightOverride));
+			}
+		});
 
-					if (taskbarEnabled) {
-						mDeviceProfile = param.getResult();
-					}
-
-				});
-
-		TaskbarProfileClass
-				.after("getHeight")
-				.run(param -> {
-					if(taskbarMode == TASKBAR_ON && taskbarHeightOverride != 1f)
-					{
-						param.setResult(Math.round((int)param.getResult() * taskbarHeightOverride));
-					}
-				});
+		// Android 17 computes taskbar rounding in TaskbarBackgroundRenderer instead
+		// of TaskbarActivityContext#getLeft/RightCornerRadius.
+		TaskbarBackgroundRendererClass.before("setCornerRoundness").run(param -> {
+			if (taskbarMode == TASKBAR_ON && TaskbarRadiusOverride != 1f
+					&& param.args.length > 0 && param.args[0] instanceof Float) {
+				param.args[0] = (Float) param.args[0] * TaskbarRadiusOverride;
+			}
+		});
 
 		RecentAppsControllerClass
 				.afterConstruction()
@@ -352,8 +387,13 @@ public class TaskbarActivator extends XposedModPack {
 
 	public int getNumShownHotseatIcons()
 	{
-		Object hotSeatProfile = getObjectField(mDeviceProfile, "mHotseatProfile");
-		return getIntField(hotSeatProfile, "numShownIcons");
+		Object hotSeatProfile = getFieldCompat(mDeviceProfile, "mHotseatProfile", "hotseatProfile");
+		if (hotSeatProfile == null) return 1;
+		try {
+			return getIntField(hotSeatProfile, "numShownIcons");
+		} catch (Throwable ignored) {
+			return 1;
+		}
 	}
 
 	public Object getCurrentTopTask()
