@@ -1,11 +1,11 @@
 package sh.siava.pixelxpert.xposed.modpacks.systemui;
 
 import static de.robv.android.xposed.XposedHelpers.getObjectField;
+import static de.robv.android.xposed.XposedHelpers.getStaticObjectField;
 import static de.robv.android.xposed.XposedHelpers.setObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 import android.content.Context;
-import android.media.MediaPlayer;
 import android.os.UserManager;
 
 import java.util.Collection;
@@ -81,12 +81,15 @@ public class ScreenshotManager extends XposedModPack {
 				});
 
 
-		//17 - much easier approach: killing mediaplayer totally
-		ReflectedClass.of(MediaPlayer.class)
-				.before("start")
+		// Android 17 plays the shutter sound in a dedicated coroutine. Hooking
+		// this path avoids muting unrelated MediaPlayer users in SystemUI.
+		ReflectedClass ScreenshotSoundCoroutineClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.screenshot.ScreenshotSoundControllerImpl$playScreenshotSoundAsync$1");
+		Object kotlinUnit = getStaticObjectField(ReflectedClass.of("kotlin.Unit").getClazz(), "INSTANCE");
+		ScreenshotSoundCoroutineClass
+				.before("invokeSuspend")
 				.run(param -> {
-					if(disableScreenshotSound)
-						param.setResult(null);
+					if (disableScreenshotSound) param.setResult(kotlinUnit);
 				});
 
 		//16 qpr2

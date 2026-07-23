@@ -63,6 +63,7 @@ public class ScreenGestures extends XposedModPack {
 	private Timer mTimer;
 	private static boolean DisableLockScreenPill = false;
 	private Object mStatusBarKeyguardViewManager;
+	private Object mStatusBarStateController;
 	private Object mDozeTouchTrigger;
 	private Object mKeyguardInteractor;
 	private Object mShadeInteractorSceneContainerImpl;
@@ -106,7 +107,12 @@ public class ScreenGestures extends XposedModPack {
 		ReflectedClass ShadeInteractorSceneContainerImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
 		ReflectedClass PulsingGestureListenerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.PulsingGestureListener");
 		ReflectedClass KeyguardInteractorClass = ReflectedClass.of("com.android.systemui.keyguard.domain.interactor.KeyguardInteractor");
+		ReflectedClass StatusBarStateControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.StatusBarStateControllerImpl");
 		ReflectedClass SettingsMenuElementProviderClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.composable.elements.SettingsMenuElementProvider");
+
+		StatusBarStateControllerClass
+				.afterConstruction()
+				.run(param -> mStatusBarStateController = param.thisObject);
 
 		ShadeInteractorSceneContainerImplClass //used to know if shade is open or not
 				.afterConstruction()
@@ -268,13 +274,25 @@ public class ScreenGestures extends XposedModPack {
 	private boolean statusBarDoubleTapAllowed() {
 		if (NotificationPanelViewController == null) return true;
 		try {
-			return !(boolean) getObjectField(NotificationPanelViewController, "mPulsing")
-					&& !(boolean) getObjectField(NotificationPanelViewController, "mDozing")
-					&& (int) getObjectField(NotificationPanelViewController, "mBarState") == SHADE
+			// Scene SystemUI exposes state through StatusBarStateController instead
+			// of NotificationPanelViewController's removed mPulsing/mDozing fields.
+			Object stateController = mStatusBarStateController;
+			if (stateController == null) {
+				stateController = callMethod(NotificationPanelViewController, "getStatusBarStateController");
+			}
+			return !(boolean) callMethod(stateController, "isPulsing")
+					&& !(boolean) callMethod(stateController, "isDozing")
+					&& (int) callMethod(stateController, "getState") == SHADE
 					&& (boolean) callMethod(NotificationPanelViewController, "isFullyCollapsed");
 		} catch (Throwable ignored) {
-			// Scene status-bar touches are already constrained to the status-bar region.
-			return true;
+			try {
+				return !(boolean) getObjectField(NotificationPanelViewController, "mPulsing")
+						&& !(boolean) getObjectField(NotificationPanelViewController, "mDozing")
+						&& (int) getObjectField(NotificationPanelViewController, "mBarState") == SHADE
+						&& (boolean) callMethod(NotificationPanelViewController, "isFullyCollapsed");
+			} catch (Throwable ignoredLegacy) {
+				return false;
+			}
 		}
 	}
 
