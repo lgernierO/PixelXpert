@@ -6,6 +6,13 @@ on:
       - 'canary'
     paths:
       - '.github/edit2MakeNewCanary'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit to build'
+        required: true
+        default: 'adapt/latest-systemui-launcher'
+        type: string
 
 jobs:
   build:
@@ -16,7 +23,16 @@ jobs:
 
     steps:
     - name: Source Code Download
+      if: github.event_name == 'push'
       run: git clone --branch canary --single-branch --recurse-submodules https://github.com/siavash79/PixelXpert.git .
+
+    - name: Source Code Download (manual branch build)
+      if: github.event_name == 'workflow_dispatch'
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.ref }}
+        submodules: recursive
+        fetch-depth: 0
       
     - name: JDK 21 Setup
       uses: actions/setup-java@v5.2.0
@@ -42,12 +58,15 @@ jobs:
       run: ./gradlew buildCanary -Pchannel=canary
 
     - name: Shell Scripts Permissions
+      if: github.event_name == 'push'
       run: chmod +x .github/*.sh
 
     - name: Changelog Generation
+      if: github.event_name == 'push'
       run: .github/extractCanaryChanges.sh
 
     - name: Version Bump
+      if: github.event_name == 'push'
       run: .github/prepareCanaryChangelog.sh ${{ github.run_id }}
 
     - name: Upload Xposed Artifact to Actions
@@ -57,6 +76,7 @@ jobs:
         path: output
 
     - name: Canary Binary Release
+      if: github.event_name == 'push'
       uses: ncipollo/release-action@v1.21.0
       with:
         tag: 'canary_builds'
@@ -69,6 +89,7 @@ jobs:
         artifacts: 'output/*.*'
 
     - name: Version Bump Commit
+      if: github.event_name == 'push'
       uses: github-actions-x/commit@v2.9
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -80,6 +101,7 @@ jobs:
         email: PixelXpert@siava.sh
 
     - name: Telegram Channel Post
+      if: github.event_name == 'push'
       uses: appleboy/telegram-action@master
       with:
         to: ${{ secrets.AOSPMODS_CHANNEL_ID }}
@@ -88,5 +110,6 @@ jobs:
         format: markdown
 
     - name: Telegram File Attachment
+      if: github.event_name == 'push'
       run: |
         curl -v "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendMediaGroup?chat_id=${{ secrets.AOSPMODS_CHANNEL_ID }}&media=%5B%7B%22type%22%3A%22document%22%2C%20%22media%22%3A%22attach%3A%2F%2FXposed%22%7D%5D" -F Xposed="@output/PixelXpert.zip"
