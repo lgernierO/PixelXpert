@@ -14,6 +14,7 @@ import android.content.Context;
 import android.view.ViewGroup;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -241,10 +242,22 @@ public class TaskbarActivator extends XposedModPack {
 		KeyboardQuickSwitchControllerClass
 				.before("openQuickSwitchView")
 				.run(param -> {
-					@SuppressWarnings("unchecked")
-					HashSet<Object> exclusionList = (HashSet<Object>) param.args[1];
-					if(notInHomeScreen())
-					{
+					// Android 17 uses openQuickSwitchView(Set, boolean). Older builds
+					// used a different argument order, so locate the exclusion set by type.
+					Set<Object> exclusionList = null;
+					for (int i = 0; i < param.args.length; i++) {
+						if (param.args[i] instanceof Set<?> candidate) {
+							// Set.of()/Kotlin sets can be immutable. Always pass Launcher a
+							// mutable copy before adding the current task ID.
+							exclusionList = new HashSet<>(candidate);
+							param.args[i] = exclusionList;
+							break;
+						}
+					}
+					if (exclusionList == null) return;
+
+					mCurrentTopTask = getCurrentTopTask();
+					if (notInHomeScreen()) {
 						exclusionList.add(callMethod(mCurrentTopTask, "getTaskId"));
 					}
 				});
@@ -349,18 +362,17 @@ public class TaskbarActivator extends XposedModPack {
 							return;
 						}
 
-						List<?> shownHotseatItems = (List<?>) getObjectField(param.thisObject, "shownHotseatItems");
-						if (!shownHotseatItems.isEmpty()) {
-							shownHotseatItems.clear();
-						}
+						// This field is Kotlin EmptyList on Android 17 and cannot be cleared.
+						setObjectField(param.thisObject, "shownHotseatItems", new ArrayList<>());
 
 						mCurrentTopTask = getCurrentTopTask();
 
-						List<?> newShownTasks = allRecentTasks.subList(Math.max(0, allRecentTasks.size() - getNumShownHotseatIcons() - 1), Math.max(allRecentTasks.size(), 0));
+						List<?> newShownTasks = new ArrayList<>(allRecentTasks.subList(
+								Math.max(0, allRecentTasks.size() - getNumShownHotseatIcons() - 1),
+								allRecentTasks.size()));
 
-						if(notInHomeScreen()) //hiding running task from taskbar
-						{
-							newShownTasks = newShownTasks.subList(0, Math.max(0, newShownTasks.size() - 1));
+						if (notInHomeScreen() && !newShownTasks.isEmpty()) { // hide the running task
+							newShownTasks.remove(newShownTasks.size() - 1);
 						}
 
 						List<?> oldShownTasks = (List<?>) getObjectField(param.thisObject, "shownTasks");
@@ -382,7 +394,7 @@ public class TaskbarActivator extends XposedModPack {
 
 						setObjectField(param.thisObject, "needsRecentsTasksReload", true);
 
-						reloadRecentTasksIfNeeded.invoke(param.thisObject, param.thisObject);
+						reloadRecentTasksIfNeeded.invoke(param.thisObject);
 
 						param.setResult(true);
 					}
@@ -409,7 +421,12 @@ public class TaskbarActivator extends XposedModPack {
 
 	public boolean notInHomeScreen()
 	{
-		return !((boolean) callMethod(mCurrentTopTask, "isHomeTask"));
+		if (mCurrentTopTask == null) return false;
+		try {
+			return !((boolean) callMethod(mCurrentTopTask, "isHomeTask"));
+		} catch (Throwable ignored) {
+			return false;
+		}
 	}
 	@SuppressWarnings("unused")
 	public void onComputeInternalInsets(Object thisObject, Object internalInsetsInfo) {

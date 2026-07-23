@@ -19,6 +19,8 @@ import android.graphics.drawable.AdaptiveIconDrawable;
 import android.os.Handler;
 import android.os.Looper;
 
+import java.lang.reflect.Field;
+
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.LauncherModPack;
@@ -52,12 +54,16 @@ public class LauncherThemedIcons extends XposedModPack {
 		ReflectedClass BaseIconFactoryClass = ReflectedClass.of("com.android.launcher3.icons.BaseIconFactory");
 		ReflectedClass LauncherAppStateClass = ReflectedClass.of("com.android.launcher3.LauncherAppState");
 
-		if(findFieldIfExists(BaseIconFactoryClass.getClazz(), "mIconBitmapSize") == null)
-		{
-			//it's 16qpr2 with built-in generator - no need to patch
+		Field iconBitmapSizeField = findFieldIfExists(BaseIconFactoryClass.getClazz(), "mIconBitmapSize");
+		if (iconBitmapSizeField == null) {
+			// Android 17 converted BaseIconFactory to Kotlin and dropped the m-prefix.
+			iconBitmapSizeField = findFieldIfExists(BaseIconFactoryClass.getClazz(), "iconBitmapSize");
+		}
+		if (iconBitmapSizeField == null) {
 			Xprefs.edit().putBoolean("DisableThemedIconsPref", true).apply();
 			return;
 		}
+		final String iconBitmapSizeFieldName = iconBitmapSizeField.getName();
 
 		Xprefs.edit().putBoolean("DisableThemedIconsPref", false).apply();
 
@@ -67,7 +73,7 @@ public class LauncherThemedIcons extends XposedModPack {
 
 		BaseIconFactoryClass
 				.afterConstruction()
-				.run(param -> mIconBitmapSize = getIntField(param.thisObject, "mIconBitmapSize"));
+				.run(param -> mIconBitmapSize = getIntField(param.thisObject, iconBitmapSizeFieldName));
 
 		ReflectedClass.of(AdaptiveIconDrawable.class)
 				.after("getMonochrome")
@@ -95,12 +101,21 @@ public class LauncherThemedIcons extends XposedModPack {
 	}
 
 	private void reloadIcons() {
+		if (LAS == null) return;
 		Object iconCache = getObjectField(LAS, "iconCache");
 
 		new Handler(Looper.getMainLooper()).post(() -> {
-			callMethod(getObjectField(iconCache, "cache"), "clear");
-			callMethod(getObjectField(iconCache, "iconDb"), "clear");
-			callMethod(getObjectField(LAS, "model"), "forceReload");
+			try { callMethod(getObjectField(iconCache, "cache"), "clear"); } catch (Throwable ignored) {}
+			try { callMethod(getObjectField(iconCache, "iconDb"), "clear"); } catch (Throwable ignored) {}
+
+			Object model = getObjectField(LAS, "model");
+			try {
+				// Android 17 requires a diagnostic reload reason.
+				callMethod(model, "forceReload", "PixelXpert themed icons changed");
+			} catch (Throwable ignored) {
+				// Older Launcher builds expose the no-argument method.
+				callMethod(model, "forceReload");
+			}
 		});
 	}
 }

@@ -324,7 +324,14 @@ public class CustomNavGestures extends XposedModPack {
 	}
 
 	private void goBack() {
-		callMethod(mSystemUIProxy, "onBackPressed");
+		try {
+			// Android 17 routes back through the display-aware key event API.
+			int displayId = mContext.getDisplay() == null ? 0 : mContext.getDisplay().getDisplayId();
+			callMethod(mSystemUIProxy, "onBackEvent", null, displayId);
+		} catch (Throwable ignored) {
+			// Compatibility with older Launcher builds.
+			try { callMethod(mSystemUIProxy, "onBackPressed"); } catch (Throwable ignoredAgain) {}
+		}
 	}
 
 	private void startOneHandedMode() {

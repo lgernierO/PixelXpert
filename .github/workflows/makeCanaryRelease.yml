@@ -69,11 +69,29 @@ jobs:
       if: github.event_name == 'push'
       run: .github/prepareCanaryChangelog.sh ${{ github.run_id }}
 
-    - name: Upload Xposed Artifact to Actions
+    - name: Prepare Directly Flashable Actions Artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        module_zip="output/PixelXpert.zip"
+        test -f "$module_zip"
+        rm -rf actions-artifact
+        mkdir -p actions-artifact
+        unzip -q "$module_zip" -d actions-artifact
+        test -f actions-artifact/module.prop
+        test -f actions-artifact/customize.sh
+        test -d actions-artifact/META-INF
+        ! find actions-artifact -maxdepth 1 -type f -name '*.zip' -print -quit | grep -q .
+
+    - name: Upload Directly Flashable Artifact to Actions
       uses: actions/upload-artifact@v7.0.1
-      with: 
-        name: PixelXpert.zip
-        path: output
+      with:
+        # GitHub adds the single download ZIP layer. Its root is the Magisk
+        # module itself, rather than a ZIP containing another module ZIP.
+        name: PixelXpert
+        path: actions-artifact/*
+        if-no-files-found: error
+        include-hidden-files: true
 
     - name: Canary Binary Release
       if: github.event_name == 'push'
