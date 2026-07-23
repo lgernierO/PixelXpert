@@ -225,14 +225,18 @@ public class TaskbarActivator extends XposedModPack {
 						        param.args[0] = false;
 				});
 
-		//temp workaround of launcher crash bug on split tasks
-		TaskbarViewClass
-				.before("updateRecents")
-				.run(param -> {
-					@SuppressWarnings("unchecked")
-					List<Object> recents = (List<Object>) param.args[1];
-					param.args[1] = recents.stream().filter(t -> !t.getClass().getName().contains("Split")).toList();
-				});
+		// Work around split-task crashes. Android 17 renamed updateRecents to
+		// updateItems; both APIs keep the recent task list at argument 1.
+		ReflectionConsumer filterSplitTasks = param -> {
+			if (param.args.length <= 1 || !(param.args[1] instanceof List)) return;
+			@SuppressWarnings("unchecked")
+			List<Object> recents = (List<Object>) param.args[1];
+			param.args[1] = recents.stream()
+					.filter(t -> t == null || !t.getClass().getName().contains("Split"))
+					.toList();
+		};
+		TaskbarViewClass.before("updateRecents").run(filterSplitTasks);
+		TaskbarViewClass.before("updateItems").run(filterSplitTasks);
 
 		KeyboardQuickSwitchControllerClass
 				.before("openQuickSwitchView")

@@ -122,7 +122,7 @@ public class StatusbarGestures extends XposedModPack {
 								MotionEvent motionEvent = (MotionEvent) param2.args[0];
 
 								if (oneFingerPullupEnabled
-										&& STATUSBAR_MODE_KEYGUARD != (int) getObjectField(NotificationPanelViewController, "mBarState")) {
+										&& STATUSBAR_MODE_KEYGUARD != getBarState(NotificationPanelViewController)) {
 									if(SystemClock.uptimeMillis() - lastPullupTouchTime[0] > 1000)
 									{
 										motionEvent.setAction(MotionEvent.ACTION_DOWN);
@@ -193,8 +193,13 @@ public class StatusbarGestures extends XposedModPack {
 	@SuppressWarnings("ConstantValue")
 	private boolean isStatusbarClosed()
 	{
-		return  (NotificationPanelViewController != null && STATUSBAR_MODE_SHADE == (int) getObjectField(NotificationPanelViewController, "mBarState")
-		||  ShadeInteractorSceneContainerImpl != null); //touch only gets here if statusbar is closed
+		return (NotificationPanelViewController != null && STATUSBAR_MODE_SHADE == getBarState(NotificationPanelViewController))
+				|| ShadeInteractorSceneContainerImpl != null; //touch only gets here if statusbar is closed
+	}
+
+	private int getBarState(Object controller) {
+		try { return (int) callMethod(controller, "getBarState"); }
+		catch (Throwable ignored) { return (int) getObjectField(controller, "mBarState"); }
 	}
 
 	private GestureDetector.OnGestureListener getPullUpListener() {
@@ -210,13 +215,18 @@ public class StatusbarGestures extends XposedModPack {
 		};
 	}
 
-	private void collapseQS() { //for now only used on pre 17QPR1
-		try
-		{
-			callMethod(NotificationPanelViewController, "collapse", true, 1f);
+	private void collapseQS() {
+		if (ShadeInteractorSceneContainerImpl != null) {
+			try {
+				callMethod(ShadeInteractorSceneContainerImpl, "collapseEitherShade", "PixelXpert.oneFingerPullup", null);
+				return;
+			} catch (Throwable ignored) {}
 		}
-		catch (Throwable ignored) {
-			callMethod(NotificationPanelViewController, "collapse", 1f, true);
+		try {
+			callMethod(NotificationPanelViewController, "collapse", true, 1f);
+		} catch (Throwable ignored) {
+			try { callMethod(NotificationPanelViewController, "collapse", 1f, true); }
+			catch (Throwable ignoredToo) {}
 		}
 	}
 

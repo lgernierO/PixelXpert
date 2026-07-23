@@ -80,6 +80,7 @@ public class FlashlightTile extends XposedModPack {
 		ReflectedClass QSTileImplClass = ReflectedClass.of("com.android.systemui.qs.tileimpl.QSTileImpl");
 		ReflectedClass DrawableIconClass = ReflectedClass.of("com.android.systemui.qs.tileimpl.QSTileImpl$DrawableIcon");
 		ReflectedClass FlashlightRepositoryImplClass = ReflectedClass.of("com.android.systemui.flashlight.data.repository.FlashlightRepositoryImpl");
+		ReflectedClass FlashlightSetLevelClass = ReflectedClass.ofIfPossible("com.android.systemui.flashlight.data.repository.FlashlightRepositoryImpl$setLevel$1");
 		ReflectedClass FlashlightTileWithLevelClass = ReflectedClass.of("com.android.systemui.qs.tiles.FlashlightTileWithLevel");
 
 		ReflectedClass.of(CameraManager.class)
@@ -125,17 +126,20 @@ public class FlashlightTile extends XposedModPack {
 						defaultEnabledLevelForUser.put(currentUserId, getFlashlightLevel(Xprefs.getInt("flashPCT", 50) / 100f));
 					}
 				});
-		FlashlightRepositoryImplClass //saving flash level to SystemUI builtin leveled tile
-				.after("setLevel")
-				.run(param -> {
-					if(leveledFlashTile) {
-						boolean persist = (boolean) param.args[1];
-						if (persist) {
-							int level = (int) param.args[0];
-							new Thread(() -> Xprefs.edit().putInt("flashPCT", Math.round((level * 100f) / getMaxFlashLevel())).apply()).start();
-						}
-					}
-				});
+		// Legacy repository method.
+		FlashlightRepositoryImplClass.after("setLevel").run(param -> {
+			if (leveledFlashTile && param.args.length > 1 && Boolean.TRUE.equals(param.args[1])) {
+				persistFlashLevel((int) param.args[0]);
+			}
+		});
+
+		// Android 17 moved setLevel into a coroutine object. Constructor args are
+		// repository, level, persist and continuation.
+		FlashlightSetLevelClass.afterConstruction().run(param -> {
+			if (leveledFlashTile && param.args.length > 2 && Boolean.TRUE.equals(param.args[2])) {
+				persistFlashLevel((int) param.args[1]);
+			}
+		});
 
 		FlashlightTileClass
 				.before("newTileState") //constructor is optimized. this is a good substitute
@@ -205,6 +209,12 @@ public class FlashlightTile extends XposedModPack {
 				.after("newTileState")
 				.run(param ->
 						setObjectField(param.getResult(), "handlesLongClick", true));
+	}
+
+	private void persistFlashLevel(int level) {
+		new Thread(() -> Xprefs.edit()
+				.putInt("flashPCT", Math.round((level * 100f) / getMaxFlashLevel()))
+				.apply()).start();
 	}
 
 	private boolean handleFlashLongClick() throws Throwable {

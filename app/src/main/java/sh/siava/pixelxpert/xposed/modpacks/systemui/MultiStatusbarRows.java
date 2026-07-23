@@ -52,8 +52,24 @@ public class MultiStatusbarRows extends XposedModPack {
 					try {
 						View linearStatusbarIconContainer = (View) param.args[0];
 
-						String id = mContext.getResources().getResourceName(((View) linearStatusbarIconContainer.getParent().getParent()).getId()); //helps getting exception if it's in QS
-						if (!id.contains("status_bar_end_side_content")) return;
+						// Android 17 passes an explicit StatusBarLocation and no longer
+						// guarantees the old two-level parent hierarchy.
+						if (param.args.length > 1 && param.args[1] != null) {
+							if (!"HOME".equals(param.args[1].toString())) return;
+						} else {
+							View parent = linearStatusbarIconContainer;
+							boolean home = false;
+							while (parent.getParent() instanceof View) {
+								parent = (View) parent.getParent();
+								try {
+									if (mContext.getResources().getResourceName(parent.getId()).contains("status_bar_end_side_content")) {
+										home = true;
+										break;
+									}
+								} catch (Throwable ignored) {}
+							}
+							if (!home) return;
+						}
 
 						FlexStatusIconContainer flex = new FlexStatusIconContainer(mContext, linearStatusbarIconContainer);
 						flex.setPadding(linearStatusbarIconContainer.getPaddingLeft(), 0, linearStatusbarIconContainer.getPaddingRight(), 0);
@@ -74,4 +90,3 @@ public class MultiStatusbarRows extends XposedModPack {
 				});
 	}
 }
-

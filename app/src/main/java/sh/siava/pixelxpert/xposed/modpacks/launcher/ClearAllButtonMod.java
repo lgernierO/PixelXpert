@@ -58,13 +58,10 @@ public class ClearAllButtonMod extends XposedModPack {
 				.afterConstruction()
 				.run(param -> recentView = param.thisObject);
 
-		RecentsViewClass
-				.after("setColorTint")
-				.run(param -> {
-					if (!RecentClearAllReposition) return;
-
-					clearAllIcon.getDrawable().setTintList(getThemedColor(mContext));
-				});
+		RecentsViewClass.after("setColorTint").run(param -> updateClearAllTint());
+		// Android 17 removed RecentsView#setColorTint. Configuration changes on
+		// the still-present actions view are the stable theme update boundary.
+		OverviewActionsViewClass.after("onConfigurationChanged").run(param -> updateClearAllTint());
 
 		RecentsViewClass
 				.after("setVisibility")
@@ -108,6 +105,11 @@ public class ClearAllButtonMod extends XposedModPack {
 					parent.addView(clearAllButton);
 					clearAllButton.setVisibility(GONE);
 				});
+	}
+
+	private void updateClearAllTint() {
+		if (!RecentClearAllReposition || clearAllIcon == null || clearAllIcon.getDrawable() == null) return;
+		clearAllIcon.getDrawable().setTintList(getThemedColor(mContext));
 	}
 
 	public static ColorStateList getThemedColor(Context context) {
