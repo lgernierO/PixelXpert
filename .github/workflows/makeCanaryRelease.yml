@@ -92,12 +92,16 @@ jobs:
 
     - name: Version Bump Commit
       if: github.event_name == 'push'
-      uses: github-actions-x/commit@v2
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        push-branch: 'canary'
-        commit-message: 'Version update: Release'
-        force-add: 'true'
-        files: MagiskModBase/module.prop version.properties latestVersion.json CanaryChangelog.md latestCanary.json MagiskModuleUpdate_Xposed.json MagiskModuleUpdate_Full.json
-        name: GitHub
-        email: PixelXpert@siava.sh
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        git config user.name GitHub
+        git config user.email PixelXpert@siava.sh
+        git add -- MagiskModBase/module.prop version.properties latestVersion.json CanaryChangelog.md latestCanary.json MagiskModuleUpdate_Xposed.json MagiskModuleUpdate_Full.json
+        if git diff --cached --quiet; then
+          exit 0
+        fi
+        git commit -m 'Version update: Release'
+        git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+        git push origin HEAD:canary
