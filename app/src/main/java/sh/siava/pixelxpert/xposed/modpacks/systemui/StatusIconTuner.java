@@ -123,7 +123,7 @@ public class StatusIconTuner extends XposedModPack {
 	private String getManagerLocation(Object manager, View container) {
 		try { return String.valueOf(getObjectField(manager, "mLocation")); }
 		catch (Throwable ignored) {}
-		ViewParent parent = container;
+		ViewParent parent = container == null ? null : container.getParent();
 		while (parent instanceof View) {
 			try {
 				String id = mContext.getResources().getResourceName(((View) parent).getId());
