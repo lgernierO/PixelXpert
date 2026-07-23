@@ -178,9 +178,7 @@ public class ScreenGestures extends XposedModPack {
 					if (!doubleTapToSleepStatusbarEnabled) return;
 
 					//double tap to sleep, statusbar only
-					//noinspection ConstantValue
-					if (NotificationPanelViewController == null || //if ViewController is null it means it's not initiated. meaning it's 17QPR1+
-							    (!(boolean) getObjectField(NotificationPanelViewController, "mPulsing") && !(boolean) getObjectField(NotificationPanelViewController, "mDozing") && (int) getObjectField(NotificationPanelViewController, "mBarState") == SHADE && (boolean) callMethod(NotificationPanelViewController, "isFullyCollapsed"))) {
+					if (statusBarDoubleTapAllowed()) {
 						mLockscreenDoubleTapToSleep.onTouchEvent((MotionEvent) param.args[param.args.length - 1]);
 					}
 		});
@@ -254,12 +252,30 @@ public class ScreenGestures extends XposedModPack {
 				.run(param -> {
 					NotificationPanelViewController = param.thisObject;
 
-					mStatusBarKeyguardViewManager = getObjectField(param.thisObject, "mStatusBarKeyguardViewManager");
+					try {
+						mStatusBarKeyguardViewManager = getObjectField(param.thisObject, "mStatusBarKeyguardViewManager");
+					} catch (Throwable ignored) {
+						// Scene implementation no longer exposes the legacy field.
+						mStatusBarKeyguardViewManager = null;
+					}
 				});
 
 		NotificationPanelViewControllerClass
 				.after("createTouchHandler")
 				.run(param -> NotificationPanelViewController = param.thisObject);
+	}
+
+	private boolean statusBarDoubleTapAllowed() {
+		if (NotificationPanelViewController == null) return true;
+		try {
+			return !(boolean) getObjectField(NotificationPanelViewController, "mPulsing")
+					&& !(boolean) getObjectField(NotificationPanelViewController, "mDozing")
+					&& (int) getObjectField(NotificationPanelViewController, "mBarState") == SHADE
+					&& (boolean) callMethod(NotificationPanelViewController, "isFullyCollapsed");
+		} catch (Throwable ignored) {
+			// Scene status-bar touches are already constrained to the status-bar region.
+			return true;
+		}
 	}
 
 	private void showAmbientDisplay(Object dozeTrigger) {
@@ -375,9 +391,14 @@ public class ScreenGestures extends XposedModPack {
 
 	private boolean keyguardNotShowingCompose()
 	{
-		return callMethod(getObjectField(mKeyguardInteractor, "isKeyguardShowing"), "getValue").equals(false)
-						|| callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue").equals(true)
-						|| (boolean) callMethod(callMethod(mShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
+		if (mKeyguardInteractor == null || mShadeInteractorSceneContainerImpl == null) return true;
+		try {
+			return callMethod(getObjectField(mKeyguardInteractor, "isKeyguardShowing"), "getValue").equals(false)
+					|| callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue").equals(true)
+					|| (boolean) callMethod(callMethod(mShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
+		} catch (Throwable ignored) {
+			return true;
+		}
 	}
 
 	private void turnOffTTT() {
