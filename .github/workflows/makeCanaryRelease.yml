@@ -28,14 +28,14 @@ jobs:
 
     - name: Source Code Download (manual branch build)
       if: github.event_name == 'workflow_dispatch'
-      uses: actions/checkout@v7.0.1
+      uses: actions/checkout@v7
       with:
         ref: ${{ inputs.ref }}
         submodules: recursive
         fetch-depth: 0
       
     - name: JDK 21 Setup
-      uses: actions/setup-java@v5.6.0
+      uses: actions/setup-java@v5
       with:
         java-version: '21'
         distribution: 'jetbrains'
@@ -69,33 +69,17 @@ jobs:
       if: github.event_name == 'push'
       run: .github/prepareCanaryChangelog.sh ${{ github.run_id }}
 
-    - name: Prepare Directly Flashable Actions Artifact
-      shell: bash
-      run: |
-        set -euo pipefail
-        module_zip="output/PixelXpert.zip"
-        test -f "$module_zip"
-        rm -rf actions-artifact
-        mkdir -p actions-artifact
-        unzip -q "$module_zip" -d actions-artifact
-        test -f actions-artifact/module.prop
-        test -f actions-artifact/customize.sh
-        test -d actions-artifact/META-INF
-        ! find actions-artifact -maxdepth 1 -type f -name '*.zip' -print -quit | grep -q .
-
     - name: Upload Directly Flashable Artifact to Actions
-      uses: actions/upload-artifact@v7.0.1
+      uses: actions/upload-artifact@v7
       with:
-        # GitHub adds the single download ZIP layer. Its root is the Magisk
-        # module itself, rather than a ZIP containing another module ZIP.
-        name: PixelXpert
-        path: actions-artifact/*
+        name: PixelXpert.zip
+        path: output/PixelXpert.zip
+        archive: false
         if-no-files-found: error
-        include-hidden-files: true
 
     - name: Canary Binary Release
       if: github.event_name == 'push'
-      uses: ncipollo/release-action@v1.21.0
+      uses: ncipollo/release-action@v1
       with:
         tag: 'canary_builds'
         name: 'Latest Canary'
@@ -108,7 +92,7 @@ jobs:
 
     - name: Version Bump Commit
       if: github.event_name == 'push'
-      uses: github-actions-x/commit@v2.9
+      uses: github-actions-x/commit@v2
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         push-branch: 'canary'
