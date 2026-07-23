@@ -34,7 +34,7 @@ preferenceKtx = "1.2.1"
 remotepreferences = "0.8"
 swiperefreshlayout = "1.2.0"
 transition = "1.7.0"
-uiGeometry = "1.10.6"
+composeBom = "2026.06.01"
 workRuntime = "2.11.2"
 kotlin = "2.4.10"
 ksp = "2.3.10"
@@ -56,8 +56,9 @@ androidx-fragment-ktx = { module = "androidx.fragment:fragment-ktx", version.ref
 androidx-preference-ktx = { module = "androidx.preference:preference-ktx", version.ref = "preferenceKtx" }
 androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "recyclerview" }
 androidx-transition = { module = "androidx.transition:transition", version.ref = "transition" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 androidx-ui = { module = "androidx.compose.ui:ui" }
-androidx-ui-geometry = { module = "androidx.compose.ui:ui-geometry", version.ref = "uiGeometry" }
+androidx-ui-geometry = { module = "androidx.compose.ui:ui-geometry" }
 androidx-work-runtime = { module = "androidx.work:work-runtime", version.ref = "workRuntime" }
 androidx-concurrent-futures = { module = "androidx.concurrent:concurrent-futures", version.ref = "concurrentFutures" }
 colorpicker = { module = "com.jaredrummler:colorpicker", version.ref = "colorpicker" }

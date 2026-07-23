@@ -145,6 +145,7 @@ dependencies {
 	implementation (libs.androidx.preference.ktx)
 	implementation (libs.androidx.recyclerview)
 	implementation (libs.android.material)
+	implementation(platform(libs.androidx.compose.bom))
 	implementation (libs.androidx.ui.geometry)
 	//noinspection KtxExtensionAvailable
 	implementation (libs.androidx.activity)
