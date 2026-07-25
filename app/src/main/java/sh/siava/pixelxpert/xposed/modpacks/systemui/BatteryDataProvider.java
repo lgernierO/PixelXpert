@@ -111,7 +111,7 @@ public class BatteryDataProvider extends XposedModPack {
 
 					if(curr > 0)
 					{
-						int wattage = Math.round(volt * curr * .000001f);
+						int wattage = (int) Math.round(((double) volt * (double) curr) / 1_000_000_000_000d);
 						if(wattage >= FastChargingWattage)
 							param.setResult(CHARGING_FAST);
 						//else: leave it for the original method to decide
