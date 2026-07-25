@@ -109,15 +109,20 @@ public class StatusIconTuner extends XposedModPack {
 	private void applyIgnoredIcons(Object manager, Object container, Set<String> ignoredSlots) {
 		setIgnoredIcons(container, ignoredSlots);
 		if (manager == null) return;
-		try {
-			ArrayList<String> merged = new ArrayList<>(systemBlockLists.getOrDefault(manager, List.of()));
-			for (String slot : ignoredSlots) if (!merged.contains(slot)) merged.add(slot);
-			applyingBlockList = true;
-			callMethod(manager, "setBlockList", merged);
-		} catch (Throwable ignored) {
-		} finally {
-			applyingBlockList = false;
-		}
+		View managerView = container instanceof View ? (View) container : null;
+		Runnable applyBlockList = () -> {
+			try {
+				ArrayList<String> merged = new ArrayList<>(systemBlockLists.getOrDefault(manager, List.of()));
+				for (String slot : ignoredSlots) if (!merged.contains(slot)) merged.add(slot);
+				applyingBlockList = true;
+				callMethod(manager, "setBlockList", merged);
+			} catch (Throwable ignored) {
+			} finally {
+				applyingBlockList = false;
+			}
+		};
+		if (managerView != null) managerView.post(applyBlockList);
+		else applyBlockList.run();
 	}
 
 	private String getManagerLocation(Object manager, View container) {

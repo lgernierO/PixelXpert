@@ -645,18 +645,30 @@ public class StatusbarMods extends XposedModPack {
 		PhoneStatusBarViewControllerClass
 				.after("onViewAttached")
 				.run(param -> {
+					// Bind to the controller's current view. Android 17 can recreate status bars
+					// per display, so the last constructed PhoneStatusBarView may be stale.
+					try {
+						mPhoneStatusbarView = (FrameLayout) getObjectField(param.thisObject, "mView");
+					} catch (Throwable ignored) {}
+					if (mPhoneStatusbarView == null) return;
+
 					mClockView = mPhoneStatusbarView.findViewById(idOf("clock"));
 					updateClockColor();
-
-					mPhoneStatusbarView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> setHeights());
-
 					mStatusbarStartSide = mPhoneStatusbarView.findViewById(idOf("status_bar_start_side_except_heads_up"));
-
 					mSystemIconArea = mPhoneStatusbarView.findViewById(idOf("statusIcons"));
 
-					createCenterIconArea();
+					try {
+						createCenterIconArea();
+					} catch (Throwable ignored) {}
 
-					makeLeftSplitArea();
+					try {
+						makeLeftSplitArea();
+						mPhoneStatusbarView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> setHeights());
+						if (mNotificationIconContainer.getChildCount() == 0) {
+							mNotificationContainerContainer.setVisibility(GONE);
+						}
+						setHeights();
+					} catch (Throwable ignored) {}
 
 					if (BBarEnabled) //in case we got the config but view wasn't ready yet
 					{
@@ -672,12 +684,6 @@ public class StatusbarMods extends XposedModPack {
 						networkTrafficSB = NetworkTraffic.getInstance(mContext, true);
 						placeNTSB();
 					}
-
-
-					if (mNotificationIconContainer.getChildCount() == 0) {
-						mNotificationContainerContainer.setVisibility(GONE);
-					}
-					setHeights();
 
 					placeClock();
 				});
@@ -751,6 +757,7 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private void createCenterIconArea() {
+		if (mCenteredIconArea != null && mCenteredIconArea.getParent() == mPhoneStatusbarView) return;
 		mCenteredIconArea = new LinearLayout(mContext);
 		FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT);
 		lp.gravity = Gravity.CENTER;
@@ -865,6 +872,7 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private View findComposeView(ViewGroup parent) {
+		if (parent == null) return null;
 		for(int i = 0; i < parent.getChildCount(); i++)
 		{
 			View child = parent.getChildAt(i);
@@ -876,6 +884,7 @@ public class StatusbarMods extends XposedModPack {
 
 
 	private void setHeights() {
+		if (mPhoneStatusbarView == null || mNotificationContainerContainer == null || mLeftExtraRowContainer == null) return;
 		@SuppressLint("DiscouragedApi") int statusbarHeight = mPhoneStatusbarView.getLayoutParams().height
 				- mContext.getResources().getDimensionPixelSize(dimenIdOf("status_bar_padding_top"));
 
@@ -1118,6 +1127,7 @@ public class StatusbarMods extends XposedModPack {
 		// anchor, so do not detach/reinsert it for the default left position.
 		if (mModernStatusBar && clockPosition == POSITION_LEFT && !notificationAreaMultiRow) return;
 		ViewGroup parent = (ViewGroup) mClockView.getParent();
+		if (parent == null) return;
 		ViewGroup targetArea = null;
 		Integer index = null;
 
@@ -1141,6 +1151,7 @@ public class StatusbarMods extends XposedModPack {
 				targetArea = ((ViewGroup) mSystemIconArea.getParent());
 				break;
 		}
+		if (targetArea == null) return;
 		parent.removeView(mClockView);
 		if (index != null) {
 			targetArea.addView(mClockView, index);
