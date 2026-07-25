@@ -4,8 +4,10 @@ on:
   push:
     branches:
       - 'canary'
+      - 'adapt/latest-systemui-launcher'
     paths:
       - '.github/edit2MakeNewCanary'
+      - '.github/workflows/makeCanaryRelease.yml'
   workflow_dispatch:
     inputs:
       ref:
@@ -22,9 +24,13 @@ jobs:
       contents: write
 
     steps:
-    - name: Source Code Download
+    - name: Source Code Download (branch push)
       if: github.event_name == 'push'
-      run: git clone --branch canary --single-branch --recurse-submodules https://github.com/siavash79/PixelXpert.git .
+      uses: actions/checkout@v7
+      with:
+        ref: ${{ github.ref }}
+        submodules: recursive
+        fetch-depth: 0
 
     - name: Source Code Download (manual branch build)
       if: github.event_name == 'workflow_dispatch'
@@ -58,15 +64,15 @@ jobs:
       run: ./gradlew buildCanary -Pchannel=canary
 
     - name: Shell Scripts Permissions
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
       run: chmod +x .github/*.sh
 
     - name: Changelog Generation
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
       run: .github/extractCanaryChanges.sh
 
     - name: Version Bump
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
       run: .github/prepareCanaryChangelog.sh ${{ github.run_id }}
 
     - name: Upload Directly Flashable Artifact to Actions
@@ -78,7 +84,7 @@ jobs:
         if-no-files-found: error
 
     - name: Canary Binary Release
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
       uses: ncipollo/release-action@v1
       with:
         tag: 'canary_builds'
@@ -91,7 +97,7 @@ jobs:
         artifacts: 'output/*.*'
 
     - name: Version Bump Commit
-      if: github.event_name == 'push'
+      if: github.event_name == 'push' && github.ref == 'refs/heads/canary'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
