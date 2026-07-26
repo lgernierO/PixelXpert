@@ -59,6 +59,7 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.Executor;
+import java.util.regex.Pattern;
 
 import javax.security.auth.callback.Callback;
 
@@ -153,6 +154,13 @@ public class StatusbarMods extends XposedModPack {
 	private static float SBPaddingStart = 0, SBPaddingEnd = 0;
 	private FrameLayout mPhoneStatusbarView;
 	private boolean mModernStatusBar;
+	/*
+	 * Android 17 renders the home status-bar clock through ClockKt and hides the
+	 * legacy Clock view on every Compose recomposition. Keep this marker scoped
+	 * to the home-status-bar composable so QS and other ClockKt consumers retain
+	 * their stock clocks.
+	 */
+	private static final ThreadLocal<Integer> statusBarClockCompositionDepth = ThreadLocal.withInitial(() -> 0);
 
 	//endregion
 
@@ -463,6 +471,8 @@ public class StatusbarMods extends XposedModPack {
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
+		ReflectedClass StatusBarClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda7");
+		ReflectedClass ClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.composable.ClockKt");
 		mModernStatusBar = StatusBarRootFactoryClass.getClazz() != null;
 		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 		ReflectedClass NotificationIconContainerClass = ReflectedClass.of("com.android.systemui.statusbar.phone.NotificationIconContainer");
@@ -688,6 +698,40 @@ public class StatusbarMods extends XposedModPack {
 					placeClock();
 				});
 
+		/*
+		 * Latest SystemUI keeps the legacy Clock for accessibility and dark-mode
+		 * updates, but its StatusBarRoot composable hides that view and draws an
+		 * independent Compose clock. PixelXpert customizes Clock#getSmallTime(), so
+		 * take over only while a clock customization is active. The depth marker
+		 * ensures ClockKt is suppressed only for the home status bar, not in QS.
+		 */
+		StatusBarClockComposableClass
+				.before("invoke")
+				.run(param -> {
+					if (!shouldUseLegacyClock()) return;
+					statusBarClockCompositionDepth.set(statusBarClockCompositionDepth.get() + 1);
+					if (mClockView != null) mClockView.setVisibility(VISIBLE);
+				});
+
+		StatusBarClockComposableClass
+				.after("invoke")
+				.run(param -> {
+					int depth = statusBarClockCompositionDepth.get() - 1;
+					if (depth > 0) {
+						statusBarClockCompositionDepth.set(depth);
+					} else {
+						statusBarClockCompositionDepth.remove();
+					}
+				});
+
+		ClockComposableClass
+				.before(Pattern.compile(".*Clock.*"))
+				.run(param -> {
+					if (statusBarClockCompositionDepth.get() > 0) {
+						param.setResult(null);
+					}
+				});
+
 		//clock mods
 		ClockClass
 				.before("getSmallTime")
@@ -797,6 +841,7 @@ public class StatusbarMods extends XposedModPack {
 	@SuppressLint("DiscouragedApi")
 	private void makeLeftSplitArea() {
 		mNotificationIconContainer = mPhoneStatusbarView.findViewById(idOf("notificationIcons"));
+		if (mNotificationIconContainer == null) return;
 
 		mNotificationContainerContainer = new LinearLayout(mContext);
 		mNotificationContainerContainer.setClipChildren(false); //allowing headsup icon to go beyond
@@ -827,6 +872,7 @@ public class StatusbarMods extends XposedModPack {
 		mLeftExtraRowContainer = new ShyLinearLayout(mContext);
 		mLeftVerticalSplitContainer.addView(mLeftExtraRowContainer, 0);
 
+		if (!(mNotificationIconContainer.getParent() instanceof ViewGroup)) return;
 		ViewGroup parent = (ViewGroup) mNotificationIconContainer.getParent();
 
 		parent.addView(mLeftVerticalSplitContainer, parent.indexOfChild(mNotificationIconContainer));
@@ -837,7 +883,12 @@ public class StatusbarMods extends XposedModPack {
 
 		mNotificationContainerContainer.addView(mNotificationIconContainer);
 
-		((LinearLayout.LayoutParams) mNotificationIconContainer.getLayoutParams()).weight = 100;
+		ViewGroup.LayoutParams notificationIconParams = mNotificationIconContainer.getLayoutParams();
+		if (notificationIconParams instanceof LinearLayout.LayoutParams) {
+			((LinearLayout.LayoutParams) notificationIconParams).weight = 100;
+		} else {
+			mNotificationIconContainer.setLayoutParams(new LinearLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT, 100));
+		}
 		mNotificationIconContainer.setOnHierarchyChangeListener(new ViewGroup.OnHierarchyChangeListener() {
 			@Override
 			public void onChildViewAdded(View parent, View child) {
@@ -854,8 +905,10 @@ public class StatusbarMods extends XposedModPack {
 			}
 		});
 
-		((View) mStatusbarStartSide.getParent()).getLayoutParams().height = MATCH_PARENT;
-		mStatusbarStartSide.getLayoutParams().height = MATCH_PARENT;
+		if (mStatusbarStartSide != null && mStatusbarStartSide.getParent() instanceof View) {
+			((View) mStatusbarStartSide.getParent()).getLayoutParams().height = MATCH_PARENT;
+			mStatusbarStartSide.getLayoutParams().height = MATCH_PARENT;
+		}
 		mLeftVerticalSplitContainer.getLayoutParams().height = MATCH_PARENT;
 	}
 
@@ -890,7 +943,7 @@ public class StatusbarMods extends XposedModPack {
 
 		mNotificationContainerContainer.getLayoutParams().height = (mLeftExtraRowContainer.getVisibility() == VISIBLE) ? statusbarHeight / 2 : MATCH_PARENT;
 		mLeftExtraRowContainer.getLayoutParams().height = ((mNotificationContainerContainer.getVisibility() == VISIBLE) ? statusbarHeight / 2 : MATCH_PARENT);
-		if (networkOnSBEnabled) {
+		if (networkOnSBEnabled && networkTrafficSB != null && networkTrafficSB.getLayoutParams() != null) {
 			networkTrafficSB.getLayoutParams().height = statusbarHeight / ((networkTrafficPosition == POSITION_LEFT && notificationAreaMultiRow) ? 2 : 1);
 		}
 	}
@@ -910,13 +963,17 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private void placeBatteryBar() {
+		if (mPhoneStatusbarView == null) return;
 		try {
 			BatteryBarView batteryBarView = BatteryBarView.getInstance(mContext);
 			try {
 				((ViewGroup) batteryBarView.getParent()).removeView(batteryBarView);
 			} catch (Throwable ignored) {}
+			// PhoneStatusBarView is a FrameLayout in the CANARY root. Give the bar
+			// parent-compatible parameters after a status-bar recreation.
+			batteryBarView.setLayoutParams(new FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT));
 			mPhoneStatusbarView.addView(batteryBarView);
-			refreshBatteryBar(BatteryBarView.getInstance());
+			refreshBatteryBar(batteryBarView);
 		} catch (Throwable ignored) {}
 	}
 	//endregion
@@ -1060,7 +1117,7 @@ public class StatusbarMods extends XposedModPack {
 		if (!networkOnSBEnabled) return;
 
 		try {
-			LinearLayout.LayoutParams ntsbLayoutP;
+			if (mStatusbarStartSide == null || mSystemIconArea == null) return;
 			switch (networkTrafficPosition) {
 				case POSITION_RIGHT:
 					((ViewGroup) mSystemIconArea.getParent()).addView(networkTrafficSB, 0);
@@ -1079,9 +1136,13 @@ public class StatusbarMods extends XposedModPack {
 					networkTrafficSB.setPadding(rightClockPadding, 0, leftClockPadding, 0);
 					break;
 			}
-			ntsbLayoutP = (LinearLayout.LayoutParams) networkTrafficSB.getLayoutParams();
-			ntsbLayoutP.gravity = Gravity.CENTER_VERTICAL;
-			networkTrafficSB.setLayoutParams(ntsbLayoutP);
+			ViewGroup.LayoutParams ntsbLayoutParams = networkTrafficSB.getLayoutParams();
+			if (ntsbLayoutParams instanceof LinearLayout.LayoutParams) {
+				((LinearLayout.LayoutParams) ntsbLayoutParams).gravity = Gravity.CENTER_VERTICAL;
+			} else if (ntsbLayoutParams instanceof FrameLayout.LayoutParams) {
+				((FrameLayout.LayoutParams) ntsbLayoutParams).gravity = Gravity.CENTER_VERTICAL;
+			}
+			networkTrafficSB.setLayoutParams(ntsbLayoutParams);
 		} catch (Throwable ignored) {}
 	}
 	//endregion
@@ -1120,6 +1181,18 @@ public class StatusbarMods extends XposedModPack {
 	//endregion
 
 	//region clock and date related
+	private boolean shouldUseLegacyClock() {
+		return !mModernStatusBar
+				|| clockPosition != POSITION_LEFT
+				|| notificationAreaMultiRow
+				|| mShowSeconds
+				|| mAmPmStyle != AM_PM_STYLE_GONE
+				|| !(mStringFormatBefore + mStringFormatAfter).trim().isEmpty()
+				|| clockColor != null
+				|| mBeforeClockColor != null
+				|| mAfterClockColor != null;
+	}
+
 	private void placeClock() {
 		if (mClockView == null) return;
 		// The Android 17 Compose status bar renders the left clock from the
