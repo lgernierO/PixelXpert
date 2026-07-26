@@ -32,28 +32,43 @@ public class PackageManager extends XposedModPack {
 
 	private static boolean PM_AllowMismatchedSignature = false;
 	private static boolean PM_AllowDowngrade = false;
+	private Timer autoDisableTimer;
 
 	public PackageManager(Context context) {
 		super(context);
 	}
-
 	@Override
 	public void onPreferenceUpdated(String... Key) {
 		PM_AllowMismatchedSignature = Xprefs.getBoolean(ALLOW_SIGNATURE_PREF, false);
 		PM_AllowDowngrade = Xprefs.getBoolean(ALLOW_DOWNGRADE_PREF, false);
 
-		if (PM_AllowDowngrade || PM_AllowMismatchedSignature) {
-			if (Key.length == 0) {
+		if (!PM_AllowDowngrade && !PM_AllowMismatchedSignature) {
+			cancelAutoDisable();
+			return;
+		}
+
+		// system_server calls this once with an empty key while loading the module.
+		// That call restores preferences and must not disable an already enabled one-shot action.
+		if (Key.length > 0 && (ALLOW_SIGNATURE_PREF.equals(Key[0]) || ALLOW_DOWNGRADE_PREF.equals(Key[0]))) {
+			scheduleAutoDisable();
+		}
+	}
+
+	private synchronized void scheduleAutoDisable() {
+		cancelAutoDisable();
+		autoDisableTimer = new Timer("PixelXpert-PackageManager", true);
+		autoDisableTimer.schedule(new TimerTask() {
+			@Override
+			public void run() {
 				disablePMMods();
-			} else if (Key[0].equals(ALLOW_SIGNATURE_PREF) || Key[0].equals(ALLOW_DOWNGRADE_PREF)) {
-				new Timer().schedule(new TimerTask() {
-									 @Override
-									 public void run() {
-										 disablePMMods();
-									 }
-								 },
-						AUTO_DISABLE_MINUTES * 60000);
 			}
+		}, AUTO_DISABLE_MINUTES * 60000L);
+	}
+
+	private synchronized void cancelAutoDisable() {
+		if (autoDisableTimer != null) {
+			autoDisableTimer.cancel();
+			autoDisableTimer = null;
 		}
 	}
 
@@ -67,10 +82,10 @@ public class PackageManager extends XposedModPack {
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		try {
-			ReflectedClass InstallPackageHelperClass = ReflectedClass.of("com.android.server.pm.InstallPackageHelper");
-			ReflectedClass PackageManagerServiceUtilsClass = ReflectedClass.of("com.android.server.pm.PackageManagerServiceUtils");
-			ReflectedClass SigningDetailsClass = ReflectedClass.of("android.content.pm.SigningDetails");
-			ReflectedClass KeySetManagerServiceClass = ReflectedClass.of("com.android.server.pm.KeySetManagerService");
+			ReflectedClass InstallPackageHelperClass = ReflectedClass.ofIfPossible("com.android.server.pm.InstallPackageHelper");
+			ReflectedClass PackageManagerServiceUtilsClass = ReflectedClass.ofIfPossible("com.android.server.pm.PackageManagerServiceUtils");
+			ReflectedClass SigningDetailsClass = ReflectedClass.ofIfPossible("android.content.pm.SigningDetails");
+			ReflectedClass KeySetManagerServiceClass = ReflectedClass.ofIfPossible("com.android.server.pm.KeySetManagerService");
 
 			try {
 				ReflectedClass ActivityManagerServiceClass = ReflectedClass.of("com.android.server.am.ActivityManagerService");
