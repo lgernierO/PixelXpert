@@ -6,7 +6,6 @@ import static de.robv.android.xposed.XposedHelpers.setObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 import android.content.Context;
-import android.os.UserManager;
 
 import java.util.Collection;
 import java.util.List;
@@ -48,10 +47,6 @@ public class ScreenshotManager extends XposedModPack {
 		ReflectedClass CaptureArgsClass = ReflectedClass.ofIfPossible("android.window.ScreenCapture.CaptureArgs"); //A16QPR1
 		ReflectedClass TakeScreenshotExecutorImplClass = ReflectedClass.of("com.android.systemui.screenshot.TakeScreenshotExecutorImpl");
 		ReflectedClass ScreenshotSoundControllerImplClass = ReflectedClass.ofIfPossible("com.android.systemui.screenshot.ScreenshotSoundControllerImpl");
-
-		ReflectedClass.of(UserManager.class)
-				.before("getUserInfo")
-				.run(param -> param.args[0] = 0);
 
 		ReflectedClass ScreenshotPolicyImplClass = ReflectedClass.ofIfPossible("com.android.systemui.screenshot.ScreenshotPolicyImpl");
 
