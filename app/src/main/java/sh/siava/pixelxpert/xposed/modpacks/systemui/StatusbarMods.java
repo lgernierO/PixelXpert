@@ -472,9 +472,8 @@ public class StatusbarMods extends XposedModPack {
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
 		// CANARY StatusBarRoot captures the actual legacy Clock before Compose hides it.
-		// Use that binding instead of relying only on a layout ID during view recreation.
-		ReflectedClass StatusBarLegacyClockBindingClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda4");
-		ReflectedClass StatusBarStartSideComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda5");
+		// Use the outer root composable, which finishes only after that hide call.
+		ReflectedClass StatusBarRootComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda0");
 		ReflectedClass StatusBarClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda7");
 		ReflectedClass ClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.composable.ClockKt");
 		mModernStatusBar = StatusBarRootFactoryClass.getClazz() != null;
@@ -708,11 +707,11 @@ public class StatusbarMods extends XposedModPack {
 		/*
 		 * CANARY keeps the legacy Clock for system state and bounds calculations,
 		 * then hides it in StatusBarRoot and draws another clock through Compose.
-		 * Capture the Clock directly from StatusBarRoot's binding lambda: during a
-		 * status-bar recreation this is more reliable than waiting for a view-ID
-		 * lookup in PhoneStatusBarViewController.
+		 * The outer root composable owns the actual Clock in f$2 and completes
+		 * after its setVisibility(GONE) call, so restoring here wins every
+		 * recomposition without globally intercepting View#setVisibility.
 		 */
-		StatusBarLegacyClockBindingClass
+		StatusBarRootComposableClass
 				.after("invoke")
 				.run(param -> {
 					Object clock = getObjectField(param.thisObject, "f$2");
@@ -721,20 +720,6 @@ public class StatusbarMods extends XposedModPack {
 					if (shouldUseLegacyClock()) {
 						mClockView.setVisibility(VISIBLE);
 						updateClock();
-					}
-				});
-
-		/*
-		 * StatusBarRoot hides the legacy Clock before it enters the nested clock
-		 * composable. Restore the view after the complete start-side composition,
-		 * not by globally intercepting View#setVisibility. That avoids affecting
-		 * QS and unrelated Compose views while surviving every recomposition.
-		 */
-		StatusBarStartSideComposableClass
-				.after("invoke")
-				.run(param -> {
-					if (shouldUseLegacyClock() && mClockView != null) {
-						mClockView.setVisibility(VISIBLE);
 					}
 				});
 
