@@ -205,6 +205,10 @@ public class FlexStatusIconContainer extends LinearLayout {
 
 			int paddings = getPaddingLeft() + getPaddingRight();
 			int availableWidth = width - paddings;
+			if (availableWidth <= 0) {
+				setDefaultResponse(widthMeasureSpec, heightMeasureSpec);
+				return;
+			}
 
 			int totalWidth = 0;
 
@@ -216,6 +220,7 @@ public class FlexStatusIconContainer extends LinearLayout {
 
 					for (int i = getChildCount() - 1; i >= 0; i--) {
 						View icon = getChildAt(i);
+						if (getViewStateFromChild(icon) == null) continue;
 
 						boolean isBlocked = false;
 						try {
@@ -303,6 +308,7 @@ public class FlexStatusIconContainer extends LinearLayout {
 
 					for (int i = getChildCount() - 1; i >= 0; i--) {
 						View icon = getChildAt(i);
+						if (getViewStateFromChild(icon) == null) continue;
 
 						boolean isBlocked = false;
 						try {
@@ -493,6 +499,7 @@ public class FlexStatusIconContainer extends LinearLayout {
 
 				int iconWidth = (i < iconCount) ? icon.getWidth() : mIconDotFrameWidth;
 				Object childState = getViewStateFromChild(icon);
+				if (childState == null) continue;
 
 				float iconTranslationY = 0;
 				float iconTranslationX = 0;
