@@ -476,6 +476,10 @@ public class StatusbarMods extends XposedModPack {
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
+		// StatusBarRoot is a stable entry point in the CANARY Compose status bar.
+		// It is also used as a fallback when a future compiler changes synthetic
+		// lambda field names while the legacy Clock is still retained by SystemUI.
+		ReflectedClass StatusBarRootClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt");
 		// CANARY StatusBarRoot captures the actual legacy Clock before Compose hides it.
 		// Use the outer root composable, which finishes only after that hide call.
 		ReflectedClass StatusBarRootComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda0");
@@ -596,7 +600,7 @@ public class StatusbarMods extends XposedModPack {
 					@SuppressLint("DiscouragedApi")
 					View sbContentsView = ((View) param.thisObject).findViewById(idOf("status_bar_contents"));
 
-					if (SBPaddingStart == PADDING_DEFAULT && SBPaddingEnd == PADDING_DEFAULT)
+					if (sbContentsView == null || (SBPaddingStart == PADDING_DEFAULT && SBPaddingEnd == PADDING_DEFAULT))
 						return;
 
 					int screenWidth = mContext.getResources().getDisplayMetrics().widthPixels;
@@ -651,12 +655,19 @@ public class StatusbarMods extends XposedModPack {
 				.after("onInit")
 				.run(param -> {
 					View mView = (View) getObjectField(param.thisObject, "mView");
+					if (mView == null) return;
 
-					mView.findViewById(idOf("clock")).setOnClickListener(clickListener);
-					mView.findViewById(idOf("clock")).setOnLongClickListener(clickListener);
+					View clock = mView.findViewById(idOf("clock"));
+					if (clock != null) {
+						clock.setOnClickListener(clickListener);
+						clock.setOnLongClickListener(clickListener);
+					}
 
-					mView.findViewById(idOf("date")).setOnClickListener(clickListener);
-					mView.findViewById(idOf("date")).setOnLongClickListener(clickListener);
+					View date = mView.findViewById(idOf("date"));
+					if (date != null) {
+						date.setOnClickListener(clickListener);
+						date.setOnLongClickListener(clickListener);
+					}
 				});
 
 		//modding clock, adding additional objects,
@@ -712,20 +723,24 @@ public class StatusbarMods extends XposedModPack {
 		/*
 		 * CANARY keeps the legacy Clock for system state and bounds calculations,
 		 * then hides it in StatusBarRoot and draws another clock through Compose.
-		 * The outer root composable owns the actual Clock in f$2 and completes
-		 * after its setVisibility(GONE) call, so restoring here wins every
-		 * recomposition without globally intercepting View#setVisibility.
+		 * Use the stable StatusBarRoot entry point as a creation-time fallback and
+		 * the current root lambda for every recomposition. The latter completes
+		 * after setVisibility(GONE), so restoring here wins without globally
+		 * intercepting View#setVisibility.
 		 */
+		StatusBarRootClass
+				.after("StatusBarRoot")
+				.run(param -> {
+					if (!shouldUseLegacyClock() || param.args.length == 0 || !(param.args[0] instanceof View)) return;
+					restoreLegacyClock(((View) param.args[0]).findViewById(idOf("clock")));
+				});
+
 		StatusBarRootComposableClass
 				.after("invoke")
 				.run(param -> {
-					Object clock = getObjectField(param.thisObject, "f$2");
-					if (!(clock instanceof TextView)) return;
-					mClockView = (TextView) clock;
-					if (shouldUseLegacyClock()) {
-						mClockView.setVisibility(VISIBLE);
-						updateClock();
-					}
+					try {
+						restoreLegacyClock(getObjectField(param.thisObject, "f$2"));
+					} catch (Throwable ignored) {}
 				});
 
 		// Suppress only the nested home-status-bar Compose clock while the legacy
@@ -832,6 +847,14 @@ public class StatusbarMods extends XposedModPack {
 		lp.gravity = Gravity.CENTER;
 		mCenteredIconArea.setLayoutParams(lp);
 		mPhoneStatusbarView.addView(mCenteredIconArea);
+	}
+
+	private void restoreLegacyClock(Object clock) {
+		if (!(clock instanceof TextView)) return;
+		mClockView = (TextView) clock;
+		if (!shouldUseLegacyClock()) return;
+		mClockView.setVisibility(VISIBLE);
+		updateClock();
 	}
 
 	private void updateClockColor() {
@@ -1224,8 +1247,8 @@ public class StatusbarMods extends XposedModPack {
 		// StatusBarRoot host. The legacy Clock view is only a compatibility
 		// anchor, so do not detach/reinsert it for the default left position.
 		if (mModernStatusBar && clockPosition == POSITION_LEFT && !notificationAreaMultiRow) return;
+		if (!(mClockView.getParent() instanceof ViewGroup)) return;
 		ViewGroup parent = (ViewGroup) mClockView.getParent();
-		if (parent == null) return;
 		ViewGroup targetArea = null;
 		Integer index = null;
 
