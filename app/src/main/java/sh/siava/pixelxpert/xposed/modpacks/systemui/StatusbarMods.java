@@ -754,9 +754,13 @@ public class StatusbarMods extends XposedModPack {
 		StatusBarClockComposableClass
 				.before("invoke")
 				.run(param -> {
-					if (!shouldUseLegacyClock()) return;
+					// Do not suppress the Compose fallback before the legacy Clock has
+					// actually been bound. On CANARY this composable can run before
+					// PhoneStatusBarViewController#onViewAttached on HOME, which used
+					// to leave the desktop with no clock at all.
+					if (!shouldUseLegacyClock() || !isLegacyClockReady()) return;
 					statusBarClockCompositionDepth.set(statusBarClockCompositionDepth.get() + 1);
-					if (mClockView != null) mClockView.setVisibility(VISIBLE);
+					mClockView.setVisibility(VISIBLE);
 				});
 
 		StatusBarClockComposableClass
@@ -859,8 +863,27 @@ public class StatusbarMods extends XposedModPack {
 		if (!(clock instanceof TextView)) return;
 		mClockView = (TextView) clock;
 		if (!shouldUseLegacyClock()) return;
+
+		// StatusBarRoot recreates/rehides this compatibility Clock on every
+		// Compose recomposition. Reapply both the user-selected parent and the
+		// formatted text to the newly captured instance; otherwise CENTER falls
+		// back to the start-side host and date text is applied to a stale view.
+		placeClock();
 		mClockView.setVisibility(VISIBLE);
 		updateClock();
+		mClockView.post(() -> {
+			if (shouldUseLegacyClock()) {
+				placeClock();
+				mClockView.setVisibility(VISIBLE);
+				updateClock();
+			}
+		});
+	}
+
+	private boolean isLegacyClockReady() {
+		return mClockView != null
+				&& mClockView.getParent() instanceof ViewGroup
+				&& mClockView.isAttachedToWindow();
 	}
 
 	private void updateClockColor() {
@@ -1277,10 +1300,12 @@ public class StatusbarMods extends XposedModPack {
 
 	private void placeClock() {
 		if (mClockView == null) return;
-		// The Android 17 Compose status bar renders the left clock from the
-		// StatusBarRoot host. The legacy Clock view is only a compatibility
-		// anchor, so do not detach/reinsert it for the default left position.
-		if (mModernStatusBar && clockPosition == POSITION_LEFT && !notificationAreaMultiRow) return;
+		// The Android 17 Compose status bar renders the unmodified default-left
+		// clock itself. Once a PixelXpert clock customization is active, the
+		// legacy Clock is the source of truth and must be placed again after each
+		// StatusBarRoot recomposition.
+		if (mModernStatusBar && clockPosition == POSITION_LEFT
+				&& !notificationAreaMultiRow && !shouldUseLegacyClock()) return;
 		if (!(mClockView.getParent() instanceof ViewGroup)) return;
 		ViewGroup parent = (ViewGroup) mClockView.getParent();
 		ViewGroup targetArea = null;
@@ -1298,20 +1323,25 @@ public class StatusbarMods extends XposedModPack {
 				mClockView.setPadding(0, 0, leftClockPadding, 0);
 				break;
 			case POSITION_CENTER:
-				targetArea = (ViewGroup) mCenteredIconArea;
+				if (!(mCenteredIconArea instanceof ViewGroup)) createCenterIconArea();
+				if (mCenteredIconArea instanceof ViewGroup) {
+					targetArea = (ViewGroup) mCenteredIconArea;
+				}
 				mClockView.setPadding(rightClockPadding, 0, rightClockPadding, 0);
 				break;
 			case POSITION_RIGHT:
 				mClockView.setPadding(rightClockPadding, 0, 0, 0);
-				targetArea = ((ViewGroup) mSystemIconArea.getParent());
+				if (mSystemIconArea != null && mSystemIconArea.getParent() instanceof ViewGroup) {
+					targetArea = (ViewGroup) mSystemIconArea.getParent();
+				}
 				break;
 		}
 		if (targetArea == null) return;
+		if (parent == targetArea) return;
 		parent.removeView(mClockView);
 		if (index != null) {
-			targetArea.addView(mClockView, index);
+			targetArea.addView(mClockView, Math.min(index, targetArea.getChildCount()));
 		} else {
-			//noinspection DataFlowIssue
 			targetArea.addView(mClockView);
 		}
 	}
