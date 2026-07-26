@@ -470,6 +470,7 @@ public class StatusbarMods extends XposedModPack {
 
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
+		ReflectedClass ViewClass = ReflectedClass.of(View.class);
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
 		ReflectedClass StatusBarClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda7");
 		ReflectedClass ClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.composable.ClockKt");
@@ -663,6 +664,9 @@ public class StatusbarMods extends XposedModPack {
 					if (mPhoneStatusbarView == null) return;
 
 					mClockView = mPhoneStatusbarView.findViewById(idOf("clock"));
+					if (mClockView != null && shouldUseLegacyClock()) {
+						mClockView.setVisibility(VISIBLE);
+					}
 					updateClockColor();
 					mStatusbarStartSide = mPhoneStatusbarView.findViewById(idOf("status_bar_start_side_except_heads_up"));
 					mSystemIconArea = mPhoneStatusbarView.findViewById(idOf("statusIcons"));
@@ -711,6 +715,19 @@ public class StatusbarMods extends XposedModPack {
 					if (!shouldUseLegacyClock()) return;
 					statusBarClockCompositionDepth.set(statusBarClockCompositionDepth.get() + 1);
 					if (mClockView != null) mClockView.setVisibility(VISIBLE);
+				});
+
+		ViewClass
+				.before("setVisibility")
+				.run(param -> {
+					// StatusBarRoot calls legacyClock.setVisibility(GONE) from inside
+					// its Compose lambda. Override only that exact call and view.
+					if (statusBarClockCompositionDepth.get() > 0
+							&& param.thisObject == mClockView
+							&& param.args.length > 0
+							&& ((Integer) param.args[0]) == GONE) {
+						param.args[0] = VISIBLE;
+					}
 				});
 
 		StatusBarClockComposableClass
