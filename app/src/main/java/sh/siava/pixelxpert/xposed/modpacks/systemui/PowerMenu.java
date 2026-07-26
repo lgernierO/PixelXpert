@@ -16,6 +16,7 @@ import android.widget.TextView;
 
 import androidx.core.content.res.ResourcesCompat;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -66,7 +67,7 @@ public class PowerMenu extends XposedModPack {
 
 					//noinspection unchecked
 					ArrayList<Object> mItems = (ArrayList<Object>) getObjectField(param.thisObject, "mItems");
-					mItems.add(PowerOptionsAction.getClazz().getConstructors()[0].newInstance(param.thisObject));
+					mItems.add(createPowerOptionsAction(PowerOptionsAction, param.thisObject));
 
 					//noinspection unchecked
 					ArrayList<Object> mPowerItems = (ArrayList<Object>) getObjectField(param.thisObject, "mPowerItems");
@@ -75,6 +76,23 @@ public class PowerMenu extends XposedModPack {
 					mPowerItems.add(getAction(new SoftRebootAction()));
 					mPowerItems.add(getAction(new SystemUIRebootAction()));
 				});
+	}
+
+	/**
+	 * Android 17's PowerOptionsAction is a static no-arg action, while older
+	 * SystemUI releases expose it as an inner action requiring the dialog.
+	 */
+	private Object createPowerOptionsAction(ReflectedClass powerOptionsAction, Object dialog) throws Throwable {
+		for (Constructor<?> constructor : powerOptionsAction.getClazz().getConstructors()) {
+			if (constructor.getParameterCount() == 0) {
+				return constructor.newInstance();
+			}
+			if (constructor.getParameterCount() == 1
+					&& constructor.getParameterTypes()[0].isInstance(dialog)) {
+				return constructor.newInstance(dialog);
+			}
+		}
+		throw new IllegalStateException("Unsupported PowerOptionsAction constructor");
 	}
 
 	private String getString(int id)
