@@ -68,19 +68,16 @@ public class BatteryDataProvider extends XposedModPack {
 		BatteryControllerImplClass
 				.after("onReceive")
 				.run(param -> {
-					mCurrentLevel = getIntField(param.thisObject, "mLevel");
-					mCharging = getBooleanField(param.thisObject, "mPluggedIn")
-							|| getBooleanField(param.thisObject, "mCharging")
-							|| getBooleanField(param.thisObject, "mWirelessCharging");
-					mPowerSave = getBooleanField(param.thisObject, "mPowerSave");
-
+					// CANARY has changed optional controller fields between builds.
+					// A missing charging flag must not suppress every battery-bar update.
 					try {
-						mIsBatteryDefender = getBooleanField(param.thisObject, "mIsBatteryDefender");
-					}
-					catch (Throwable ignored) { //older versions of Android don't have defender
-						mIsBatteryDefender = false;
-					}
-
+						mCurrentLevel = getIntField(param.thisObject, "mLevel");
+					} catch (Throwable ignored) {}
+					mCharging = getBooleanFieldOrDefault(param.thisObject, "mPluggedIn", false)
+							|| getBooleanFieldOrDefault(param.thisObject, "mCharging", false)
+							|| getBooleanFieldOrDefault(param.thisObject, "mWirelessCharging", false);
+					mPowerSave = getBooleanFieldOrDefault(param.thisObject, "mPowerSave", false);
+					mIsBatteryDefender = getBooleanFieldOrDefault(param.thisObject, "mIsBatteryDefender", false);
 					fireBatteryInfoChanged();
 				});
 
@@ -131,6 +128,14 @@ public class BatteryDataProvider extends XposedModPack {
 						onBatteryStatusChanged((int) getObjectField(param.thisObject, "status"), (Intent) param.args[0]);
 					}
 				});
+	}
+
+	private boolean getBooleanFieldOrDefault(Object object, String field, boolean defaultValue) {
+		try {
+			return getBooleanField(object, field);
+		} catch (Throwable ignored) {
+			return defaultValue;
+		}
 	}
 
 	private void onBatteryStatusChanged(int status, Intent intent) {
