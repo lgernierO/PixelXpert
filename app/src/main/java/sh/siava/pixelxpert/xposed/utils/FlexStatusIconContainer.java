@@ -190,14 +190,18 @@ public class FlexStatusIconContainer extends LinearLayout {
 			}
 
 
-			ViewGroup parent = (ViewGroup) this.getParent();
-			if(parent.getLayoutParams().height != MATCH_PARENT)
-			{
-				parent.getLayoutParams().height = MATCH_PARENT;
+			// During CANARY Compose root recreation this container can be measured
+			// after it is detached but before the new parent is assigned.
+			if (getParent() instanceof ViewGroup) {
+				ViewGroup parent = (ViewGroup) getParent();
+				if (parent.getLayoutParams() != null
+						&& parent.getLayoutParams().height != MATCH_PARENT) {
+					parent.getLayoutParams().height = MATCH_PARENT;
+				}
 			}
 
-			int totalIconHeight = mIconSize;
-			int totalPossibleRows = height / totalIconHeight;
+			int totalIconHeight = Math.max(1, mIconSize);
+			int totalPossibleRows = Math.max(1, height / totalIconHeight);
 
 			int paddings = getPaddingLeft() + getPaddingRight();
 			int availableWidth = width - paddings;
@@ -379,7 +383,9 @@ public class FlexStatusIconContainer extends LinearLayout {
 			mHasDot = true;
 		}
 		Object childState = getViewStateFromChild(child);
-		setObjectField(childState, "visibleState", state);
+		if (childState != null) {
+			setObjectField(childState, "visibleState", state);
+		}
 	}
 
 	@Override
@@ -463,6 +469,7 @@ public class FlexStatusIconContainer extends LinearLayout {
 				return;
 
 			if (mRowCount == 0) {
+				if (mColWidths.size() == 0) return;
 				mRowCount = (int) Math.ceil((mIconWidths.size() + (mHasDot ? 1 : 0)) / (double) mColWidths.size());
 			}
 
