@@ -267,8 +267,13 @@ public class StatusbarMods extends XposedModPack {
 			NotificationAODIconLimit = getIntegerResource("max_notif_icons_on_aod", 3);
 		}
 
+		// The CANARY binders are created independently. Preference updates can arrive
+		// after the AOD binder is ready but before the status-bar binder exists.
+		// Do not let that normal initialization race crash SystemUI.
 		if (AODNIC != null) {
 			setObjectField(AODNIC, "maxIcons", NotificationAODIconLimit);
+		}
+		if (SBNIC != null) {
 			setObjectField(SBNIC, "maxIcons", NotificationIconLimit);
 		}
 
