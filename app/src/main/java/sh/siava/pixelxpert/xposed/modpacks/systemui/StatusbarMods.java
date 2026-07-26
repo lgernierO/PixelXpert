@@ -723,7 +723,10 @@ public class StatusbarMods extends XposedModPack {
 						placeNTSB();
 					}
 
-					placeClock();
+					// The Clock may be created after preferences were read on the HOME
+					// surface. Use the same path as StatusBarRoot recomposition so date
+					// prefixes/suffixes and the selected parent are applied immediately.
+					restoreLegacyClock(mClockView);
 				});
 
 		/*
@@ -766,10 +769,10 @@ public class StatusbarMods extends XposedModPack {
 		StatusBarClockComposableClass
 				.after("invoke")
 				.run(param -> {
-					int depth = statusBarClockCompositionDepth.get() - 1;
-					if (depth > 0) {
-						statusBarClockCompositionDepth.set(depth);
-					} else {
+					int depth = statusBarClockCompositionDepth.get();
+					if (depth > 1) {
+						statusBarClockCompositionDepth.set(depth - 1);
+					} else if (depth == 1) {
 						statusBarClockCompositionDepth.remove();
 					}
 				});
