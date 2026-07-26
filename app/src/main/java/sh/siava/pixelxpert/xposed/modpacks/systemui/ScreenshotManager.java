@@ -64,6 +64,22 @@ public class ScreenshotManager extends XposedModPack {
 					});
 		}
 
+		// Android 17 moved work-profile classification into the screenshot-only
+		// ProfileTypeRepository. Treat WORK as a regular profile when the legacy
+		// insecure screenshot option is enabled; do not intercept UserManager globally.
+		ReflectedClass ScreenshotProfileTypeClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.screenshot.data.model.ProfileType");
+		ReflectedClass ScreenshotProfileTypeResolverClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.screenshot.data.repository.ProfileTypeRepositoryImpl$getProfileType$2$1");
+		ScreenshotProfileTypeResolverClass
+				.after("invokeSuspend")
+				.run(param -> {
+					if (!ScreenshotChordInsecure || ScreenshotProfileTypeClass.getClazz() == null) return;
+					if ("WORK".equals(String.valueOf(param.getResult()))) {
+						param.setResult(getStaticObjectField(ScreenshotProfileTypeClass.getClazz(), "NONE"));
+					}
+				});
+
 		NewCaptureArgsClass
 				.afterConstruction()
 				.run(param -> {
