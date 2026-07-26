@@ -470,8 +470,11 @@ public class StatusbarMods extends XposedModPack {
 
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
-		ReflectedClass ViewClass = ReflectedClass.of(View.class);
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
+		// CANARY StatusBarRoot captures the actual legacy Clock before Compose hides it.
+		// Use that binding instead of relying only on a layout ID during view recreation.
+		ReflectedClass StatusBarLegacyClockBindingClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda4");
+		ReflectedClass StatusBarStartSideComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda5");
 		ReflectedClass StatusBarClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda7");
 		ReflectedClass ClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.composable.ClockKt");
 		mModernStatusBar = StatusBarRootFactoryClass.getClazz() != null;
@@ -703,31 +706,46 @@ public class StatusbarMods extends XposedModPack {
 				});
 
 		/*
-		 * Latest SystemUI keeps the legacy Clock for accessibility and dark-mode
-		 * updates, but its StatusBarRoot composable hides that view and draws an
-		 * independent Compose clock. PixelXpert customizes Clock#getSmallTime(), so
-		 * take over only while a clock customization is active. The depth marker
-		 * ensures ClockKt is suppressed only for the home status bar, not in QS.
+		 * CANARY keeps the legacy Clock for system state and bounds calculations,
+		 * then hides it in StatusBarRoot and draws another clock through Compose.
+		 * Capture the Clock directly from StatusBarRoot's binding lambda: during a
+		 * status-bar recreation this is more reliable than waiting for a view-ID
+		 * lookup in PhoneStatusBarViewController.
 		 */
+		StatusBarLegacyClockBindingClass
+				.after("invoke")
+				.run(param -> {
+					Object clock = getObjectField(param.thisObject, "f$2");
+					if (!(clock instanceof TextView)) return;
+					mClockView = (TextView) clock;
+					if (shouldUseLegacyClock()) {
+						mClockView.setVisibility(VISIBLE);
+						updateClock();
+					}
+				});
+
+		/*
+		 * StatusBarRoot hides the legacy Clock before it enters the nested clock
+		 * composable. Restore the view after the complete start-side composition,
+		 * not by globally intercepting View#setVisibility. That avoids affecting
+		 * QS and unrelated Compose views while surviving every recomposition.
+		 */
+		StatusBarStartSideComposableClass
+				.after("invoke")
+				.run(param -> {
+					if (shouldUseLegacyClock() && mClockView != null) {
+						mClockView.setVisibility(VISIBLE);
+					}
+				});
+
+		// Suppress only the nested home-status-bar Compose clock while the legacy
+		// Clock is being used for a PixelXpert customization.
 		StatusBarClockComposableClass
 				.before("invoke")
 				.run(param -> {
 					if (!shouldUseLegacyClock()) return;
 					statusBarClockCompositionDepth.set(statusBarClockCompositionDepth.get() + 1);
 					if (mClockView != null) mClockView.setVisibility(VISIBLE);
-				});
-
-		ViewClass
-				.before("setVisibility")
-				.run(param -> {
-					// StatusBarRoot calls legacyClock.setVisibility(GONE) from inside
-					// its Compose lambda. Override only that exact call and view.
-					if (statusBarClockCompositionDepth.get() > 0
-							&& param.thisObject == mClockView
-							&& param.args.length > 0
-							&& ((Integer) param.args[0]) == GONE) {
-						param.args[0] = VISIBLE;
-					}
 				});
 
 		StatusBarClockComposableClass
