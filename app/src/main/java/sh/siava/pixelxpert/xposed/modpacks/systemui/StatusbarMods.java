@@ -627,11 +627,11 @@ public class StatusbarMods extends XposedModPack {
 		//bypassing the max icon limit during measurement
 		NotificationIconContainerClass
 				.before("onMeasure")
-				.run(param -> setObjectField(param.thisObject, "mIsStaticLayout", false));
+				.run(param -> { if (notificationAreaMultiRow) setObjectField(param.thisObject, "mIsStaticLayout", false); });
 
 		NotificationIconContainerClass
 				.after("onMeasure")
-				.run(param -> setObjectField(param.thisObject, "mIsStaticLayout", true));
+				.run(param -> { if (notificationAreaMultiRow) setObjectField(param.thisObject, "mIsStaticLayout", true); });
 
 		//endregion
 
