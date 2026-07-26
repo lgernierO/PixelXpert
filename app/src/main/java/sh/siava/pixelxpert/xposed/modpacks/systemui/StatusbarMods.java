@@ -518,7 +518,13 @@ public class StatusbarMods extends XposedModPack {
 
 		StatusBarIconControllerImplClass
 				.afterConstruction()
-				.run(param -> mStatusBarIconController = param.thisObject);
+				.run(param -> {
+					mStatusBarIconController = param.thisObject;
+					// The icon controller and status-bar view are constructed by separate
+					// CANARY binders. Re-evaluate IMS state once the controller is ready;
+					// a prior callback may have run while it was still null.
+					if (telephonyCallbackRegistered) updateVoData(true);
+				});
 
 
 		if (NotificationIconContainerAlwaysOnDisplayViewModelClass.getClazz() != null) //Viewbinder implementation of the notification icon container
@@ -1048,17 +1054,23 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private Object getStatusbarIconHolderFor(Object statusbarIcon) {
-		Object holder = ObjenesisHelper.newInstance(StatusBarIconHolderClass.getClazz());
-		String[] iconFiled = new String[1];
-		Arrays.stream(StatusBarIconHolderClass.getClazz().getFields()).forEach(field ->
-		{
-			if (field.getName().toLowerCase().contains("icon"))
-				iconFiled[0] = field.getName();
-		});
+		if (statusbarIcon == null || StatusBarIconHolderClass == null
+				|| StatusBarIconHolderClass.getClazz() == null) return null;
+		try {
+			Object holder = ObjenesisHelper.newInstance(StatusBarIconHolderClass.getClazz());
+			String[] iconField = new String[1];
+			Arrays.stream(StatusBarIconHolderClass.getClazz().getFields()).forEach(field ->
+			{
+				if (field.getName().toLowerCase().contains("icon"))
+					iconField[0] = field.getName();
+			});
 
-		setObjectField(holder, iconFiled[0], statusbarIcon);
-
-		return holder;
+			if (iconField[0] == null) return null;
+			setObjectField(holder, iconField[0], statusbarIcon);
+			return holder;
+		} catch (Throwable ignored) {
+			return null;
+		}
 	}
 
 	//endregion
@@ -1067,6 +1079,9 @@ public class StatusbarMods extends XposedModPack {
 	private void initVoData() {
 		try {
 			if (!telephonyCallbackRegistered) {
+				if (StatusBarIconClass == null || StatusBarIconClass.getClazz() == null
+						|| StatusBarIconHolderClass == null || StatusBarIconHolderClass.getClazz() == null
+						|| SystemUtils.TelephonyManager() == null) return;
 
 				Icon volteIcon = Icon.createWithResource(BuildConfig.APPLICATION_ID, R.drawable.ic_volte);
 				Object volteStatusbarIcon = getStatusbarIconFor(volteIcon, VO_LTE_SLOT);
@@ -1076,15 +1091,17 @@ public class StatusbarMods extends XposedModPack {
 				Object vowifiStatusbarIcon = getStatusbarIconFor(vowifiIcon, VO_WIFI_SLOT);
 				vowifiStatusbarIconHolder = getStatusbarIconHolderFor(vowifiStatusbarIcon);
 
-				//noinspection DataFlowIssue
+				if ((VolteIconEnabled && volteStatusbarIconHolder == null)
+						|| (VowifiIconEnabled && vowifiStatusbarIconHolder == null)) return;
+
 				SystemUtils.TelephonyManager().registerTelephonyCallback(voDataExec, voDataCallback);
 				telephonyCallbackRegistered = true;
 			}
-		} catch (Exception ignored) {						
-
+			updateVoData(true);
+		} catch (Throwable ignored) {
+			// Telephony and icon-controller initialization are independent in CANARY.
+			// The next binder attachment or service-state callback retries safely.
 		}
-
-		updateVoData(true);
 	}
 
 	private void removeVoDataCallback() {
@@ -1108,47 +1125,60 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private void updateVoData(boolean force) {
-		boolean voWifiAvailable = (Boolean) callMethod(SystemUtils.TelephonyManager(), "isWifiCallingAvailable");
-		boolean volteStateAvailable = (Boolean) callMethod(SystemUtils.TelephonyManager(), "isVolteAvailable");
+		try {
+			if (SystemUtils.TelephonyManager() == null) return;
+			Object wifiCallingAvailable = callMethod(SystemUtils.TelephonyManager(), "isWifiCallingAvailable");
+			Object volteAvailable = callMethod(SystemUtils.TelephonyManager(), "isVolteAvailable");
+			if (!(wifiCallingAvailable instanceof Boolean) || !(volteAvailable instanceof Boolean)) return;
 
-		if (lastVolteAvailable != volteStateAvailable || force) {
-			lastVolteAvailable = volteStateAvailable;
-			if (volteStateAvailable && VolteIconEnabled) {
-				mPhoneStatusbarView.post(() -> {
-					try {
-						callMethod(mStatusBarIconController, "setIcon", VO_LTE_SLOT, volteStatusbarIconHolder);
-					} catch (Exception ignored) {}
-				});
-			} else {
-				removeSBIconSlot(VO_LTE_SLOT);
+			boolean voWifiAvailable = (Boolean) wifiCallingAvailable;
+			boolean volteStateAvailable = (Boolean) volteAvailable;
+
+			if (lastVolteAvailable != volteStateAvailable || force) {
+				lastVolteAvailable = volteStateAvailable;
+				if (volteStateAvailable && VolteIconEnabled) {
+					setSBIconSlot(VO_LTE_SLOT, volteStatusbarIconHolder);
+				} else {
+					removeSBIconSlot(VO_LTE_SLOT);
+				}
 			}
-		}
 
-		if (lastVowifiAvailable != voWifiAvailable || force) {
-			lastVowifiAvailable = voWifiAvailable;
-			if (voWifiAvailable && VowifiIconEnabled) {
-				mPhoneStatusbarView.post(() -> {
-					try {
-						callMethod(mStatusBarIconController, "setIcon", VO_WIFI_SLOT, vowifiStatusbarIconHolder);
-					} catch (Exception ignored) {						
-
-					}
-				});
-			} else {
-				removeSBIconSlot(VO_WIFI_SLOT);
+			if (lastVowifiAvailable != voWifiAvailable || force) {
+				lastVowifiAvailable = voWifiAvailable;
+				if (voWifiAvailable && VowifiIconEnabled) {
+					setSBIconSlot(VO_WIFI_SLOT, vowifiStatusbarIconHolder);
+				} else {
+					removeSBIconSlot(VO_WIFI_SLOT);
+				}
 			}
+		} catch (Throwable ignored) {
+			// IMS APIs can be unavailable before the active subscription is bound.
 		}
 	}
 
-	private void removeSBIconSlot(String slot) {
-		if (mPhoneStatusbarView == null) return; //probably it's too soon to have a statusbar
+	private void setSBIconSlot(String slot, Object holder) {
+		View statusbarView = mPhoneStatusbarView;
+		Object iconController = mStatusBarIconController;
+		if (statusbarView == null || iconController == null || holder == null) return;
 
-		mPhoneStatusbarView.post(() -> {
+		statusbarView.post(() -> {
+			if (mStatusBarIconController != iconController) return;
 			try {
-				callMethod(mStatusBarIconController, "removeAllIconsForSlot", slot, false);
-			} catch (Throwable ignored) {						
+				callMethod(iconController, "setIcon", slot, holder);
+			} catch (Throwable ignored) {}
+		});
+	}
 
-			}
+	private void removeSBIconSlot(String slot) {
+		View statusbarView = mPhoneStatusbarView;
+		Object iconController = mStatusBarIconController;
+		if (statusbarView == null || iconController == null) return;
+
+		statusbarView.post(() -> {
+			if (mStatusBarIconController != iconController) return;
+			try {
+				callMethod(iconController, "removeAllIconsForSlot", slot, false);
+			} catch (Throwable ignored) {}
 		});
 	}
 	//endregion
@@ -1165,22 +1195,26 @@ public class StatusbarMods extends XposedModPack {
 		if (!networkOnSBEnabled) return;
 
 		try {
-			if (mStatusbarStartSide == null || mSystemIconArea == null) return;
 			switch (networkTrafficPosition) {
 				case POSITION_RIGHT:
+					if (mSystemIconArea == null || !(mSystemIconArea.getParent() instanceof ViewGroup)) return;
 					((ViewGroup) mSystemIconArea.getParent()).addView(networkTrafficSB, 0);
 					networkTrafficSB.setPadding(rightClockPadding, 0, leftClockPadding, 0);
 					break;
 				case POSITION_LEFT:
 					if (notificationAreaMultiRow) {
+						if (mLeftExtraRowContainer == null) return;
 						mLeftExtraRowContainer.addView(networkTrafficSB, mLeftExtraRowContainer.getChildCount());
 					} else {
+						if (mStatusbarStartSide == null) return;
 						mStatusbarStartSide.addView(networkTrafficSB, 1);
 					}
 					networkTrafficSB.setPadding(0, 0, leftClockPadding, 0);
 					break;
 				case POSITION_CENTER:
-					mStatusbarStartSide.addView(networkTrafficSB);
+					if (mCenteredIconArea == null) createCenterIconArea();
+					if (!(mCenteredIconArea instanceof ViewGroup)) return;
+					((ViewGroup) mCenteredIconArea).addView(networkTrafficSB);
 					networkTrafficSB.setPadding(rightClockPadding, 0, leftClockPadding, 0);
 					break;
 			}
