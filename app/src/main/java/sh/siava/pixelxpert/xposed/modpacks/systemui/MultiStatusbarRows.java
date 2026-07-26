@@ -8,6 +8,9 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 
+import java.util.IdentityHashMap;
+import java.util.Map;
+
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.SystemUIModPack;
@@ -19,6 +22,9 @@ import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 @SystemUIModPack
 public class MultiStatusbarRows extends XposedModPack {
 	private static boolean systemIconsMultiRow = false;
+	/* Android 17 may rebind the HOME icon manager without destroying its source
+	 * container. Keep the existing replacement instead of adding another row. */
+	private final Map<View, FlexStatusIconContainer> flexContainers = new IdentityHashMap<>();
 
 	public MultiStatusbarRows(Context context) {
 		super(context);
@@ -50,6 +56,7 @@ public class MultiStatusbarRows extends XposedModPack {
 					if (!systemIconsMultiRow) return;
 
 					try {
+						if (param.args.length == 0 || !(param.args[0] instanceof View)) return;
 						View linearStatusbarIconContainer = (View) param.args[0];
 
 						// Android 17 passes an explicit StatusBarLocation and no longer
@@ -71,19 +78,30 @@ public class MultiStatusbarRows extends XposedModPack {
 							if (!home) return;
 						}
 
+						if (linearStatusbarIconContainer instanceof FlexStatusIconContainer) return;
+						FlexStatusIconContainer previous = flexContainers.get(linearStatusbarIconContainer);
+						if (previous != null && previous.getParent() instanceof ViewGroup) {
+							param.args[0] = previous;
+							return;
+						}
+						if (!(linearStatusbarIconContainer.getParent() instanceof ViewGroup)) return;
+
 						FlexStatusIconContainer flex = new FlexStatusIconContainer(mContext, linearStatusbarIconContainer);
 						flex.setPadding(linearStatusbarIconContainer.getPaddingLeft(), 0, linearStatusbarIconContainer.getPaddingRight(), 0);
 
 						LinearLayout.LayoutParams flexParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1);
 						flex.setLayoutParams(flexParams);
-
 						flex.setForegroundGravity(Gravity.CENTER_VERTICAL | Gravity.END);
 
 						ViewGroup parent = (ViewGroup) linearStatusbarIconContainer.getParent();
 						int index = parent.indexOfChild(linearStatusbarIconContainer);
+						if (index < 0) return;
 						parent.addView(flex, index);
-						parent.getLayoutParams().height = LinearLayout.LayoutParams.MATCH_PARENT;
+						if (parent.getLayoutParams() != null) {
+							parent.getLayoutParams().height = LinearLayout.LayoutParams.MATCH_PARENT;
+						}
 						linearStatusbarIconContainer.setVisibility(View.GONE); //remove will crash the system
+						flexContainers.put(linearStatusbarIconContainer, flex);
 						param.args[0] = flex;
 
 					} catch (Throwable ignored) {}
