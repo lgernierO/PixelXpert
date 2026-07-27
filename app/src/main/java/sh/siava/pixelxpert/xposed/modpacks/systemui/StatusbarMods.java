@@ -176,6 +176,9 @@ public class StatusbarMods extends XposedModPack {
 	private Object mCanaryHomeClockViewModel;
 	private boolean mCanaryHomeClockVisible;
 	private boolean mCanaryHomeClockKnown;
+	/* Fail closed until SystemUI reports its current keyguard state. This keeps
+	 * a newly-created HOME root from leaking the overlay into lockscreen/AOD. */
+	private boolean mCanaryKeyguardShowing = true;
 	private final Runnable mCanaryClockTick = new Runnable() {
 		@Override
 		public void run() {
@@ -532,9 +535,9 @@ public class StatusbarMods extends XposedModPack {
 					 * before callbacks. Read that verified controller field directly,
 					 * so the overlay is never visible in the lockscreen/AOD host. */
 					boolean keyguardShowing = getBooleanField(param.thisObject, "mShowing");
+					mCanaryKeyguardShowing = keyguardShowing;
 					mCanaryHomeClockVisible = !keyguardShowing && mCanaryHomeClockKnown;
 					updateCanaryClockOverlayVisibility();
-					if (keyguardShowing) {
 					for (ClockVisibilityCallback c : clockVisibilityCallbacks)
 					{
 						try {
@@ -787,7 +790,8 @@ public class StatusbarMods extends XposedModPack {
 						/* Lambda7 exists only under HomeStatusBar's StatusBarRoot.
 						 * Its invocation means HOME is active; keyguard callbacks still
 						 * take precedence and hide the overlay while locked. */
-						if (mCanaryHomeClockKnown) mCanaryHomeClockVisible = true;
+						mCanaryHomeClockVisible = !mCanaryKeyguardShowing && mCanaryHomeClockKnown;
+						updateCanaryClockOverlayVisibility();
 					} catch (Throwable ignored) {}
 				});
 
@@ -917,6 +921,7 @@ public class StatusbarMods extends XposedModPack {
 			mCanaryClockAttached = false;
 			mCanaryHomeClockVisible = false;
 			mCanaryHomeClockKnown = false;
+			mCanaryKeyguardShowing = true;
 			mCanaryHomeClockViewModel = null;
 			mNotificationIconContainer = null;
 			mNotificationContainerContainer = null;
@@ -943,7 +948,7 @@ public class StatusbarMods extends XposedModPack {
 				&& mCanaryHomeClockVisible
 				&& mCanaryClockAttached
 				&& mCanaryClockOverlay != null
-				&& mCanaryClockOverlay.isAttachedToWindow()
+				&& belongsToCurrentPhoneStatusbar(mCanaryClockOverlay)
 				&& mCanaryClockOverlay.getVisibility() == VISIBLE;
 	}
 
@@ -992,20 +997,21 @@ public class StatusbarMods extends XposedModPack {
 		placeCanaryClockOverlay();
 		updateCanaryClockOverlayVisibility();
 		refreshCanaryClockText();
-		mCanaryClockAttached = mCanaryClockOverlay.isAttachedToWindow();
+		/* A child already parented in the current PhoneStatusBarView will attach
+		 * with that root in the same frame. It is therefore safe to suppress the
+		 * Compose clock before View#isAttachedToWindow becomes true: no time-width
+		 * placeholder is measured, and the overlay is present when the root draws. */
+		mCanaryClockAttached = belongsToCurrentPhoneStatusbar(mCanaryClockOverlay);
 
-		if (mCanaryClockAttached) {
+		if (mCanaryClockOverlay.isAttachedToWindow()) {
 			scheduleCanaryClockTick();
 		} else {
-			/* Do not suppress ClockKt until our native view is on screen. A
-			 * follow-up root recomposition performs the hand-over after attach;
-			 * this favors the stock clock for one frame over a possible blank one. */
 			mCanaryClockOverlay.post(() -> {
 				if (mCanaryClockOverlay == null || !shouldRenderCanaryOverlay()) return;
 				placeCanaryClockOverlay();
-				mCanaryClockAttached = mCanaryClockOverlay.isAttachedToWindow();
+				mCanaryClockAttached = belongsToCurrentPhoneStatusbar(mCanaryClockOverlay);
 				refreshCanaryClockText();
-				if (mCanaryClockAttached) scheduleCanaryClockTick();
+				if (mCanaryClockOverlay.isAttachedToWindow()) scheduleCanaryClockTick();
 			});
 		}
 	}
