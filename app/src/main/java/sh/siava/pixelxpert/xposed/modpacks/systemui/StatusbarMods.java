@@ -170,6 +170,12 @@ public class StatusbarMods extends XposedModPack {
 	 * by Lambda7 instead and recognize both first render and recompositions.
 	 */
 	private Object mCanaryHomeClockViewModel;
+	/*
+	 * The controller is retained only to read its verified mShowing field while
+	 * a keyguard-state callback is in flight. CANARY can compose HOME before our
+	 * after-hook runs, so the cached boolean alone is one frame behind on unlock.
+	 */
+	private Object mCanaryKeyguardStateController;
 	/* Fail closed until SystemUI reports its current keyguard state. This keeps
 	 * a newly-created HOME root from leaking the overlay into lockscreen/AOD. */
 	private boolean mCanaryKeyguardShowing = true;
@@ -526,7 +532,9 @@ public class StatusbarMods extends XposedModPack {
 				.afterConstruction()
 				.run(param -> {
 					/* mShowing is initialized by the target controller constructor.
-					 * Read it before the first HOME root can attach an overlay. */
+					 * Retain this verified CANARY instance so a HOME composition that
+					 * races notifyKeyguardState can read the current value directly. */
+					mCanaryKeyguardStateController = param.thisObject;
 					try {
 						mCanaryKeyguardShowing = getBooleanField(param.thisObject, "mShowing");
 						if (mCanaryKeyguardShowing) removeCanaryClockOverlay();
@@ -794,17 +802,36 @@ public class StatusbarMods extends XposedModPack {
 				.run(param -> {
 					/* f$1 is the verified HomeStatusBar.Clock ClockViewModel in
 					 * 系统界面_CANARY.APK. Store identity rather than a call-stack flag:
-					 * ClockKt's restart lambda bypasses Lambda7 on recomposition. */
+					 * ClockKt's restart lambda bypasses Lambda7 on recomposition.
+					 *
+					 * Lambda7 is immediately upstream of the first ClockKt call. Prepare
+					 * the native overlay here, not from a later keyguard post(), so its
+					 * first HOME frame has one renderer instead of stock Text plus ours. */
 					try {
 						Object clockViewModel = getObjectField(param.thisObject, "f$1");
-						if (clockViewModel != null) mCanaryHomeClockViewModel = clockViewModel;
+						if (clockViewModel != null) {
+							mCanaryHomeClockViewModel = clockViewModel;
+							if (shouldRenderCanaryOverlay()) refreshClockRenderer();
+						}
 					} catch (Throwable ignored) {}
 				});
 
 		ClockComposableClass
 				.before(Pattern.compile(".*Clock.*"))
 				.run(param -> {
-					if (isCanaryHomeClock(param) && shouldUseCanaryOverlay()) {
+					if (isCanaryHomeClock(param) && shouldReplaceCanaryHomeClock()) {
+						/*
+						 * Do not make native-clock suppression depend on the overlay already
+						 * being attached. On unlock CANARY can invoke ClockKt before the
+						 * keyguard after-hook posts the overlay; allowing this one call is
+						 * what leaves a second stock clock visible until a later recomposition.
+						 *
+						 * If HOME is already live, Lambda7 prepared the overlay above. If the
+						 * keyguard is still visible, leave the overlay detached but still
+						 * suppress this HOME-only Compose Text; notifyKeyguardState(false)
+						 * attaches it as soon as HOME is allowed to be shown.
+						 */
+						if (shouldRenderCanaryOverlay()) refreshClockRenderer();
 						/* Return before the Compose Text node is emitted. This removes
 						 * the stock clock from both rendering and measurement, so centred
 						 * notification/icon layout has no transparent blank separator. */
@@ -963,12 +990,13 @@ public class StatusbarMods extends XposedModPack {
 		return param.args[0] == mCanaryHomeClockViewModel;
 	}
 
-	private boolean shouldRenderCanaryOverlay() {
+	private boolean shouldReplaceCanaryHomeClock() {
 		/* Preserve the stock Compose renderer when PixelXpert is not changing the
 		 * clock. Besides avoiding needless view work this also makes a user who
-		 * resets every option return to the exact CANARY default. */
+		 * resets every option return to the exact CANARY default. Keyguard state is
+		 * deliberately not part of this decision: ClockKt belongs to HOME and must
+		 * never get one stock frame while the custom renderer is being handed over. */
 		return mModernStatusBar
-				&& !mCanaryKeyguardShowing
 				&& (clockPosition != POSITION_LEFT
 				|| notificationAreaMultiRow
 				|| mShowSeconds
@@ -977,6 +1005,22 @@ public class StatusbarMods extends XposedModPack {
 				|| clockColor != null
 				|| mBeforeClockColor != null
 				|| mAfterClockColor != null);
+	}
+
+	private boolean isCanaryKeyguardShowing() {
+		/* KeyguardStateControllerImpl.mShowing is present in the target CANARY
+		 * APK. Reading it here closes the interval between its assignment inside
+		 * notifyKeyguardState() and our after-hook that updates the cached value. */
+		if (mCanaryKeyguardStateController != null) {
+			try {
+				mCanaryKeyguardShowing = getBooleanField(mCanaryKeyguardStateController, "mShowing");
+			} catch (Throwable ignored) {}
+		}
+		return mCanaryKeyguardShowing;
+	}
+
+	private boolean shouldRenderCanaryOverlay() {
+		return shouldReplaceCanaryHomeClock() && !isCanaryKeyguardShowing();
 	}
 
 	private void refreshClockRenderer() {
