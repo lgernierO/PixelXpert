@@ -145,20 +145,24 @@ public class PackageManager extends XposedModPack {
 			SigningDetailsClass
 					.before("checkCapability")
 					.run(param -> {
-						/* services.jar CANARY invokes checkCapability(SigningDetails, 1/8)
-						 * for package replacement. Capability 4 belongs to permission
-						 * reconciliation and remains limited by the same-package /data
-						 * InstallPackageHelper hook below; do not bypass unrelated
-						 * SigningDetails capabilities or the String/digest overload. */
+						/* Keep the original package-manager feature semantics: allow the
+						 * SigningDetails compatibility chain while the short-lived switch
+						 * is enabled, except capability 4 (permission ownership).
+						 *
+						 * CANARY uses 1/8 for the regular replacement checks, but a
+						 * replacement that enters shared-UID reconciliation also uses
+						 * capability 2 in PackageManagerServiceUtils.canJoinSharedUserId().
+						 * Limiting this hook to 1/8 therefore leaves a real same-package
+						 * update path rejecting differently signed packages. Capability 4
+						 * stays confined to the same-package /data/ permission hook below;
+						 * String/digest overloads are still excluded by the argument check. */
 						if (PM_AllowMismatchedSignature
 								&& param.args.length == 2
 								&& param.args[0] != null
 								&& "android.content.pm.SigningDetails".equals(param.args[0].getClass().getName())
-								&& param.args[1] instanceof Integer) {
-							int capability = (Integer) param.args[1];
-							if (capability == 1 || capability == 8) {
-								param.setResult(true);
-							}
+								&& param.args[1] instanceof Integer
+								&& (Integer) param.args[1] != PERMISSION) {
+							param.setResult(true);
 						}
 					});
 
