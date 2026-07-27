@@ -167,7 +167,15 @@ public class StatusbarMods extends XposedModPack {
 	 * be safely used while the root is still being attached, which is important
 	 * because Compose may render its first frame before the controller callback. */
 	private boolean mCanaryClockAttached;
-	private static final ThreadLocal<Integer> statusBarClockCompositionDepth = ThreadLocal.withInitial(() -> 0);
+	/*
+	 * The CANARY Home clock is a restartable Compose function. Its restart
+	 * lambda calls ClockKt directly, so a ThreadLocal scoped to Lambda7 is lost
+	 * after the first composition. Keep the exact HOME ClockViewModel captured
+	 * by Lambda7 instead and recognize both first render and recompositions.
+	 */
+	private Object mCanaryHomeClockViewModel;
+	private boolean mCanaryHomeClockVisible;
+	private boolean mCanaryHomeClockKnown;
 	private final Runnable mCanaryClockTick = new Runnable() {
 		@Override
 		public void run() {
@@ -522,6 +530,13 @@ public class StatusbarMods extends XposedModPack {
 				.run(param -> {
 					Object mKeyguardUpdateMonitor = getObjectField(param.thisObject, "mKeyguardUpdateMonitor");
 					boolean keyguardShowing = (boolean) getObjectField(mKeyguardUpdateMonitor, "mKeyguardShowing");
+					/* The overlay belongs exclusively to the HOME PhoneStatusBarView.
+					 * Keyguard/AOD has a different status-bar host; hide immediately so
+					 * it cannot appear below the lock-screen operator name. */
+					if (keyguardShowing) {
+						mCanaryHomeClockVisible = false;
+						updateCanaryClockOverlayVisibility();
+					}
 					for (ClockVisibilityCallback c : clockVisibilityCallbacks)
 					{
 						try {
@@ -765,37 +780,31 @@ public class StatusbarMods extends XposedModPack {
 		StatusBarClockComposableClass
 				.before("invoke")
 				.run(param -> {
-					/* This lambda is the verified HOME-only parent of ClockKt. Keep
-					 * the nesting marker even while custom rendering is disabled so
-					 * ClockKt's after-hook can retire an old overlay only after the
-					 * native Compose clock has actually been invoked. */
-					statusBarClockCompositionDepth.set(statusBarClockCompositionDepth.get() + 1);
-				});
-
-		StatusBarClockComposableClass
-				.after("invoke")
-				.run(param -> {
-					int depth = statusBarClockCompositionDepth.get();
-					if (depth > 1) {
-						statusBarClockCompositionDepth.set(depth - 1);
-					} else if (depth == 1) {
-						statusBarClockCompositionDepth.remove();
-					}
+					/* f$1 is the verified HomeStatusBar.Clock ClockViewModel in
+					 * 系统界面_CANARY.APK. Store identity rather than a call-stack flag:
+					 * ClockKt's restart lambda bypasses Lambda7 on recomposition. */
+					try {
+						mCanaryHomeClockViewModel = getObjectField(param.thisObject, "f$1");
+						mCanaryHomeClockKnown = mCanaryHomeClockViewModel != null;
+					} catch (Throwable ignored) {}
 				});
 
 		ClockComposableClass
 				.before(Pattern.compile(".*Clock.*"))
 				.run(param -> {
-					if (statusBarClockCompositionDepth.get() > 0 && shouldUseCanaryOverlay()) {
+					if (isCanaryHomeClock(param) && shouldUseCanaryOverlay()) {
+						/* Return before the Compose Text node is emitted. This removes
+						 * the stock clock from both rendering and measurement, so centred
+						 * notification/icon layout has no transparent blank separator. */
 						param.setResult(null);
 					}
 				});
 
 		ClockComposableClass
 				.after(Pattern.compile(".*Clock.*")).run(param -> {
-					/* Removing a previous native overlay here is safe: this exact
-					 * HOME ClockKt invocation has just restored its Compose content. */
-					if (statusBarClockCompositionDepth.get() > 0 && !shouldRenderCanaryOverlay()) {
+					/* A HOME ClockKt call that was allowed through means stock Compose
+					 * has completed its hand-over; only then retire an old overlay. */
+					if (isCanaryHomeClock(param) && !shouldRenderCanaryOverlay()) {
 						removeCanaryClockOverlay();
 					}
 				});
@@ -904,6 +913,9 @@ public class StatusbarMods extends XposedModPack {
 			/* A recreated status bar owns a new notification/Compose hierarchy.
 			 * Never place an overlay into one of the old display's wrappers. */
 			mCanaryClockAttached = false;
+			mCanaryHomeClockVisible = false;
+			mCanaryHomeClockKnown = false;
+			mCanaryHomeClockViewModel = null;
 			mNotificationIconContainer = null;
 			mNotificationContainerContainer = null;
 			mLeftVerticalSplitContainer = null;
@@ -926,10 +938,23 @@ public class StatusbarMods extends XposedModPack {
 
 	private boolean shouldUseCanaryOverlay() {
 		return shouldRenderCanaryOverlay()
+				&& mCanaryHomeClockVisible
 				&& mCanaryClockAttached
 				&& mCanaryClockOverlay != null
 				&& mCanaryClockOverlay.isAttachedToWindow()
 				&& mCanaryClockOverlay.getVisibility() == VISIBLE;
+	}
+
+	private boolean isCanaryHomeClock(XposedInterface.BeforeHookCallback param) {
+		if (!mCanaryHomeClockKnown || param.args.length == 0) return false;
+		/* ClockKt has one ClockViewModel parameter. The same identity is retained
+		 * by its generated restart lambda, unlike the Lambda7 stack frame. */
+		return param.args[0] == mCanaryHomeClockViewModel;
+	}
+
+	private boolean isCanaryHomeClock(XposedInterface.AfterHookCallback param) {
+		if (!mCanaryHomeClockKnown || param.args.length == 0) return false;
+		return param.args[0] == mCanaryHomeClockViewModel;
 	}
 
 	private boolean shouldRenderCanaryOverlay() {
@@ -968,7 +993,7 @@ public class StatusbarMods extends XposedModPack {
 		ensureCanaryClockOverlay();
 		if (mCanaryClockOverlay == null) return;
 		placeCanaryClockOverlay();
-		mCanaryClockOverlay.setVisibility(VISIBLE);
+		updateCanaryClockOverlayVisibility();
 		refreshCanaryClockText();
 		mCanaryClockAttached = mCanaryClockOverlay.isAttachedToWindow();
 
@@ -986,6 +1011,13 @@ public class StatusbarMods extends XposedModPack {
 				if (mCanaryClockAttached) scheduleCanaryClockTick();
 			});
 		}
+	}
+
+	private void updateCanaryClockOverlayVisibility() {
+		if (mCanaryClockOverlay == null) return;
+		boolean visible = shouldRenderCanaryOverlay() && mCanaryHomeClockVisible;
+		mCanaryClockOverlay.setVisibility(visible ? VISIBLE : GONE);
+		if (!visible) mCanaryClockOverlay.removeCallbacks(mCanaryClockTick);
 	}
 
 	private void removeCanaryClockOverlay() {
