@@ -122,6 +122,8 @@ public class PackageManager extends XposedModPack {
 			} catch (Throwable ignored) {
 			}
 
+			// CANARY keeps three checkDowngrade overloads. The name-based helper hooks
+			// all three, covering package, system-package and raw-version install paths.
 			PackageManagerServiceUtilsClass
 					.before("checkDowngrade")
 					.run(param -> {
@@ -130,12 +132,12 @@ public class PackageManager extends XposedModPack {
 						}
 					});
 
-			// Android 17's install reconciliation checks upgrade keysets before verifySignatures().
-			// Only bypass that package-install gate while the short-lived mismatched-signature option is enabled.
+			// CANARY checks upgrade keysets before both install reconciliation paths.
+			// Restrict the broad method-name hook to its two-argument result check.
 			KeySetManagerServiceClass
 					.before("checkUpgradeKeySetLocked")
 					.run(param -> {
-						if (PM_AllowMismatchedSignature) {
+						if (PM_AllowMismatchedSignature && param.args.length == 2) {
 							param.setResult(true);
 						}
 					});
@@ -143,8 +145,8 @@ public class PackageManager extends XposedModPack {
 			SigningDetailsClass
 					.before("checkCapability")
 					.run(param -> {
-						// checkCapability(String, int) is also used for certificate-digest queries.
-						// The installer only uses the SigningDetails overload, so keep the bypass scoped to it.
+						// CANARY invokes checkCapability(SigningDetails, int) for install
+						// reconciliation; leave digest and other overloads untouched.
 						if (PM_AllowMismatchedSignature
 								&& param.args.length == 2
 								&& param.args[0] != null
@@ -155,12 +157,16 @@ public class PackageManager extends XposedModPack {
 						}
 					});
 
+			// The standard reconciliation overload has seven arguments on CANARY.
+			// Avoid altering future or unrelated same-name overloads.
 			PackageManagerServiceUtilsClass
 					.before("verifySignatures")
 					.run(param -> {
 						try {
-							if (PM_AllowMismatchedSignature &&
-									callMethod(
+							if (PM_AllowMismatchedSignature
+										&& param.args.length == 7
+										&& param.args[0] != null
+										&& callMethod(
 											callMethod(param.args[0], "getSigningDetails"),
 											"getSignatures"
 									) != null) {
@@ -170,12 +176,15 @@ public class PackageManager extends XposedModPack {
 						}
 					});
 
+			// This permission-ownership method remains separate from update reconciliation.
+			// On CANARY its descriptor has exactly three arguments.
 			InstallPackageHelperClass
 					.before("doesSignatureMatchForPermissions")
 					.run(param -> {
 						try {
 							if (PM_AllowMismatchedSignature
-									&& callMethod(param.args[1], "getPackageName").equals(param.args[0])
+										&& param.args.length == 3
+										&& callMethod(param.args[1], "getPackageName").equals(param.args[0])
 									&& ((String) callMethod(param.args[1], "getBaseApkPath")).startsWith("/data")) {
 								param.setResult(true);
 							}
