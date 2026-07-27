@@ -528,15 +528,13 @@ public class StatusbarMods extends XposedModPack {
 		KeyguardStateControllerImplClass
 				.after("notifyKeyguardState")
 				.run(param -> {
-					Object mKeyguardUpdateMonitor = getObjectField(param.thisObject, "mKeyguardUpdateMonitor");
-					boolean keyguardShowing = (boolean) getObjectField(mKeyguardUpdateMonitor, "mKeyguardShowing");
-					/* The overlay belongs exclusively to the HOME PhoneStatusBarView.
-					 * Keyguard/AOD has a different status-bar host; hide immediately so
-					 * it cannot appear below the lock-screen operator name. */
+					/* CANARY notifyKeyguardState(showing, occluded) updates mShowing
+					 * before callbacks. Read that verified controller field directly,
+					 * so the overlay is never visible in the lockscreen/AOD host. */
+					boolean keyguardShowing = getBooleanField(param.thisObject, "mShowing");
+					mCanaryHomeClockVisible = !keyguardShowing && mCanaryHomeClockKnown;
+					updateCanaryClockOverlayVisibility();
 					if (keyguardShowing) {
-						mCanaryHomeClockVisible = false;
-						updateCanaryClockOverlayVisibility();
-					}
 					for (ClockVisibilityCallback c : clockVisibilityCallbacks)
 					{
 						try {
@@ -786,6 +784,10 @@ public class StatusbarMods extends XposedModPack {
 					try {
 						mCanaryHomeClockViewModel = getObjectField(param.thisObject, "f$1");
 						mCanaryHomeClockKnown = mCanaryHomeClockViewModel != null;
+						/* Lambda7 exists only under HomeStatusBar's StatusBarRoot.
+						 * Its invocation means HOME is active; keyguard callbacks still
+						 * take precedence and hide the overlay while locked. */
+						if (mCanaryHomeClockKnown) mCanaryHomeClockVisible = true;
 					} catch (Throwable ignored) {}
 				});
 
@@ -945,15 +947,10 @@ public class StatusbarMods extends XposedModPack {
 				&& mCanaryClockOverlay.getVisibility() == VISIBLE;
 	}
 
-	private boolean isCanaryHomeClock(XposedInterface.BeforeHookCallback param) {
+	private boolean isCanaryHomeClock(sh.siava.pixelxpert.xposed.utils.reflection.HookHelper.RunParam param) {
 		if (!mCanaryHomeClockKnown || param.args.length == 0) return false;
 		/* ClockKt has one ClockViewModel parameter. The same identity is retained
 		 * by its generated restart lambda, unlike the Lambda7 stack frame. */
-		return param.args[0] == mCanaryHomeClockViewModel;
-	}
-
-	private boolean isCanaryHomeClock(XposedInterface.AfterHookCallback param) {
-		if (!mCanaryHomeClockKnown || param.args.length == 0) return false;
 		return param.args[0] == mCanaryHomeClockViewModel;
 	}
 
