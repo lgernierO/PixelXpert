@@ -42,6 +42,7 @@ import android.text.style.RelativeSizeSpan;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -146,7 +147,15 @@ public class StatusbarMods extends XposedModPack {
 	private static final ArrayList<StatusbarTextColorCallback> mTextColorCallbacks = new ArrayList<>();
 	//    private Object STB = null;
 
+	/*
+	 * CANARY renders the home clock from ClockViewModel/ClockKt and keeps the XML
+	 * Clock only as a bounds/compatibility view. Do not move that compatibility
+	 * view: StatusBarRoot hides it during every recomposition. A dedicated native
+	 * overlay gives PixelXpert one stable rendering owner for location, date text,
+	 * seconds and colour customisation.
+	 */
 	private TextView mClockView;
+	private TextView mCanaryClockOverlay;
 	private ViewGroup mNotificationIconContainer = null;
 	LinearLayout mNotificationContainerContainer;
 	private LinearLayout mLeftVerticalSplitContainer;
@@ -154,13 +163,18 @@ public class StatusbarMods extends XposedModPack {
 	private static float SBPaddingStart = 0, SBPaddingEnd = 0;
 	private FrameLayout mPhoneStatusbarView;
 	private boolean mModernStatusBar;
-	/*
-	 * Android 17 renders the home status-bar clock through ClockKt and hides the
-	 * legacy Clock view on every Compose recomposition. Keep this marker scoped
-	 * to the home-status-bar composable so QS and other ClockKt consumers retain
-	 * their stock clocks.
-	 */
+	/* True once the overlay has a parent in the current PhoneStatusBarView. It can
+	 * be safely used while the root is still being attached, which is important
+	 * because Compose may render its first frame before the controller callback. */
+	private boolean mCanaryClockAttached;
 	private static final ThreadLocal<Integer> statusBarClockCompositionDepth = ThreadLocal.withInitial(() -> 0);
+	private final Runnable mCanaryClockTick = new Runnable() {
+		@Override
+		public void run() {
+			refreshCanaryClockText();
+			scheduleCanaryClockTick();
+		}
+	};
 
 	//endregion
 
@@ -269,7 +283,8 @@ public class StatusbarMods extends XposedModPack {
 
 		// The CANARY binders are created independently. Preference updates can arrive
 		// after the AOD binder is ready but before the status-bar binder exists.
-		// Do not let that normal initialization race crash SystemUI.
+		// Both target flows read their instance field at collection time; update the
+		// already-created model only after confirming it is available.
 		if (AODNIC != null) {
 			setObjectField(AODNIC, "maxIcons", NotificationAODIconLimit);
 		}
@@ -417,8 +432,7 @@ public class StatusbarMods extends XposedModPack {
 		}
 
 		try {
-			placeClock();
-			updateClock();
+			refreshClockRenderer();
 		} catch (Throwable ignored) {}
 		//endregion clock settings
 
@@ -457,9 +471,10 @@ public class StatusbarMods extends XposedModPack {
 
 	private void updateClock() {
 		try {
+			if (mClockView == null) return;
 			mClockView.post(() -> { //the builtin update method doesn't care about the format. Just the text sadly
+				if (mClockView == null) return;
 				callMethod(getObjectField(mClockView, "mCalendar"), "setTimeInMillis", System.currentTimeMillis());
-
 				mClockView.setText((CharSequence) callMethod(mClockView, "getSmallTime"));
 			});
 		} catch (Throwable ignored) {
@@ -476,12 +491,11 @@ public class StatusbarMods extends XposedModPack {
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
-		// StatusBarRoot is a stable entry point in the CANARY Compose status bar.
-		// It is also used as a fallback when a future compiler changes synthetic
-		// lambda field names while the legacy Clock is still retained by SystemUI.
-		ReflectedClass StatusBarRootClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt");
-		// CANARY StatusBarRoot captures the actual legacy Clock before Compose hides it.
-		// Use the outer root composable, which finishes only after that hide call.
+		/*
+		 * Verified against 系统界面_CANARY.APK:
+		 * StatusBarRootKt$$ExternalSyntheticLambda0 invokes ClockViewModel/ClockKt
+		 * and calls setVisibility(GONE) on the XML Clock during recomposition.
+		 */
 		ReflectedClass StatusBarRootComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda0");
 		ReflectedClass StatusBarClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda7");
 		ReflectedClass ClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.composable.ClockKt");
@@ -532,6 +546,9 @@ public class StatusbarMods extends XposedModPack {
 			NotificationIconContainerAlwaysOnDisplayViewModelClass
 					.afterConstruction()
 					.run(param -> {
+						/* maxIcons is final in Kotlin but is read with iget by the
+						 * CANARY icon flow after construction. Xposed's field writer is
+						 * therefore applied only to this verified instance field. */
 						AODNIC = param.thisObject;
 						setObjectField(AODNIC, "maxIcons", NotificationAODIconLimit);
 					});
@@ -598,7 +615,9 @@ public class StatusbarMods extends XposedModPack {
 		//region SB Padding
 		PhoneStatusBarViewClass
 				.afterConstruction()
-				.run(param -> mPhoneStatusbarView = (FrameLayout) param.thisObject);
+				.run(param -> {
+					if (param.thisObject instanceof View) bindPhoneStatusbarView((View) param.thisObject);
+				});
 
 		PhoneStatusBarViewClass
 				.after("updateStatusBarHeight")
@@ -676,45 +695,43 @@ public class StatusbarMods extends XposedModPack {
 					}
 				});
 
-		//modding clock, adding additional objects,
+		// CANARY clock renderer. The XML Clock remains in its stock location so
+		// StatusBarRoot can use it for bounds; all visible custom content belongs
+		// to the overlay attached to PhoneStatusBarView.
 		PhoneStatusBarViewControllerClass
 				.after("onViewAttached")
 				.run(param -> {
-					// Bind to the controller's current view. Android 17 can recreate status bars
-					// per display, so the last constructed PhoneStatusBarView may be stale.
 					try {
-						mPhoneStatusbarView = (FrameLayout) getObjectField(param.thisObject, "mView");
+						Object view = getObjectField(param.thisObject, "mView");
+						if (view instanceof View) bindPhoneStatusbarView((View) view);
 					} catch (Throwable ignored) {}
 					if (mPhoneStatusbarView == null) return;
 
-					mClockView = mPhoneStatusbarView.findViewById(idOf("clock"));
-					if (mClockView != null && shouldUseLegacyClock()) {
-						mClockView.setVisibility(VISIBLE);
-					}
 					updateClockColor();
-					mStatusbarStartSide = mPhoneStatusbarView.findViewById(idOf("status_bar_start_side_except_heads_up"));
-					mSystemIconArea = mPhoneStatusbarView.findViewById(idOf("statusIcons"));
 
 					try {
 						createCenterIconArea();
 					} catch (Throwable ignored) {}
 
-					try {
-						makeLeftSplitArea();
-						mPhoneStatusbarView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> setHeights());
-						if (mNotificationIconContainer.getChildCount() == 0) {
-							mNotificationContainerContainer.setVisibility(GONE);
-						}
-						setHeights();
-					} catch (Throwable ignored) {}
+					/* The split container changes the HOME hierarchy. Do not build it
+					 * when multi-row is disabled: the CANARY Compose host and stock
+					 * notification layout must then stay untouched. */
+					if (notificationAreaMultiRow) {
+						try {
+							makeLeftSplitArea();
+							mPhoneStatusbarView.addOnLayoutChangeListener((v, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> setHeights());
+							if (mNotificationIconContainer != null && mNotificationIconContainer.getChildCount() == 0) {
+								mNotificationContainerContainer.setVisibility(GONE);
+							}
+							setHeights();
+						} catch (Throwable ignored) {}
+					}
 
-					if (BBarEnabled) //in case we got the config but view wasn't ready yet
-					{
+					if (BBarEnabled) {
 						placeBatteryBar();
 					}
 
-					if (VolteIconEnabled || VowifiIconEnabled) //in case we got the config but context wasn't ready yet
-					{
+					if (VolteIconEnabled || VowifiIconEnabled) {
 						initVoData();
 					}
 
@@ -723,47 +740,36 @@ public class StatusbarMods extends XposedModPack {
 						placeNTSB();
 					}
 
-					// The Clock may be created after preferences were read on the HOME
-					// surface. Use the same path as StatusBarRoot recomposition so date
-					// prefixes/suffixes and the selected parent are applied immediately.
-					restoreLegacyClock(mClockView);
+					refreshClockRenderer();
 				});
 
 		/*
-		 * CANARY keeps the legacy Clock for system state and bounds calculations,
-		 * then hides it in StatusBarRoot and draws another clock through Compose.
-		 * Use the stable StatusBarRoot entry point as a creation-time fallback and
-		 * the current root lambda for every recomposition. The latter completes
-		 * after setVisibility(GONE), so restoring here wins without globally
-		 * intercepting View#setVisibility.
+		 * StatusBarRoot's start-side lambda is the CANARY-specific composition
+		 * boundary. Its f$2 field is the exact XML Clock captured by the target
+		 * APK. Bind and place our overlay before Lambda7 invokes ClockKt so the
+		 * first HOME composition cannot flash a duplicate or leave a blank clock.
 		 */
-		StatusBarRootClass
-				.after("StatusBarRoot")
-				.run(param -> {
-					if (!shouldUseLegacyClock() || param.args.length == 0 || !(param.args[0] instanceof View)) return;
-					restoreLegacyClock(((View) param.args[0]).findViewById(idOf("clock")));
-				});
-
 		StatusBarRootComposableClass
-				.after("invoke")
+				.before("invoke")
 				.run(param -> {
 					try {
-						restoreLegacyClock(getObjectField(param.thisObject, "f$2"));
+						Object clock = getObjectField(param.thisObject, "f$2");
+						if (clock instanceof View) bindPhoneStatusbarView((View) clock);
 					} catch (Throwable ignored) {}
+					/* Lambda0 can be invoked as an unchanged Compose skip. Only create
+					 * a view when the user really enabled a custom clock. */
+					if (shouldRenderCanaryOverlay()) refreshClockRenderer();
 				});
 
-		// Suppress only the nested home-status-bar Compose clock while the legacy
-		// Clock is being used for a PixelXpert customization.
+
 		StatusBarClockComposableClass
 				.before("invoke")
 				.run(param -> {
-					// Do not suppress the Compose fallback before the legacy Clock has
-					// actually been bound. On CANARY this composable can run before
-					// PhoneStatusBarViewController#onViewAttached on HOME, which used
-					// to leave the desktop with no clock at all.
-					if (!shouldUseLegacyClock() || !isLegacyClockReady()) return;
+					/* This lambda is the verified HOME-only parent of ClockKt. Keep
+					 * the nesting marker even while custom rendering is disabled so
+					 * ClockKt's after-hook can retire an old overlay only after the
+					 * native Compose clock has actually been invoked. */
 					statusBarClockCompositionDepth.set(statusBarClockCompositionDepth.get() + 1);
-					mClockView.setVisibility(VISIBLE);
 				});
 
 		StatusBarClockComposableClass
@@ -780,8 +786,17 @@ public class StatusbarMods extends XposedModPack {
 		ClockComposableClass
 				.before(Pattern.compile(".*Clock.*"))
 				.run(param -> {
-					if (statusBarClockCompositionDepth.get() > 0) {
+					if (statusBarClockCompositionDepth.get() > 0 && shouldUseCanaryOverlay()) {
 						param.setResult(null);
+					}
+				});
+
+		ClockComposableClass
+				.after(Pattern.compile(".*Clock.*")).run(param -> {
+					/* Removing a previous native overlay here is safe: this exact
+					 * HOME ClockKt invocation has just restored its Compose content. */
+					if (statusBarClockCompositionDepth.get() > 0 && !shouldRenderCanaryOverlay()) {
+						removeCanaryClockOverlay();
 					}
 				});
 
@@ -789,6 +804,9 @@ public class StatusbarMods extends XposedModPack {
 		ClockClass
 				.before("getSmallTime")
 				.run(param -> {
+					// The CANARY overlay owns formatting. Keep the hidden compatibility
+					// Clock stock so StatusBarRoot bounds bookkeeping remains valid.
+					if (mModernStatusBar) return;
 					setObjectField(param.thisObject, "mAmPmStyle", AM_PM_STYLE_GONE);
 					setObjectField(param.thisObject, "mShowSeconds", mShowSeconds);
 				});
@@ -796,8 +814,8 @@ public class StatusbarMods extends XposedModPack {
 		ClockClass
 				.after("getSmallTime")
 				.run(param -> {
-					if (param.thisObject != mClockView)
-						return; //We don't want custom format in QS header. do we?
+					if (mModernStatusBar || param.thisObject != mClockView)
+						return; // CANARY uses the standalone overlay; do not alter QS.
 
 					SpannableStringBuilder result = new SpannableStringBuilder();
 					result.append(getFormattedString(mStringFormatBefore, mBeforeSmall, mBeforeClockColor)); //before clock
@@ -832,6 +850,7 @@ public class StatusbarMods extends XposedModPack {
 						return; //We don't want colors of QS header. only statusbar
 
 					updateClockColor();
+					if (mModernStatusBar) refreshClockRenderer();
 					if (BatteryBarView.hasInstance()) {
 						refreshBatteryBar(BatteryBarView.getInstance());
 					}
@@ -862,37 +881,299 @@ public class StatusbarMods extends XposedModPack {
 		mPhoneStatusbarView.addView(mCenteredIconArea);
 	}
 
-	private void restoreLegacyClock(Object clock) {
-		if (!(clock instanceof TextView)) return;
-		mClockView = (TextView) clock;
-		if (!shouldUseLegacyClock()) return;
+	private void bindPhoneStatusbarView(View candidate) {
+		if (candidate == null) return;
 
-		// StatusBarRoot recreates/rehides this compatibility Clock on every
-		// Compose recomposition. Reapply both the user-selected parent and the
-		// formatted text to the newly captured instance; otherwise CENTER falls
-		// back to the start-side host and date text is applied to a stale view.
-		placeClock();
-		mClockView.setVisibility(VISIBLE);
-		updateClock();
-		mClockView.post(() -> {
-			if (shouldUseLegacyClock()) {
-				placeClock();
-				mClockView.setVisibility(VISIBLE);
-				updateClock();
+		View current = candidate;
+		FrameLayout phoneStatusbarView = null;
+		while (current != null) {
+			if (current instanceof FrameLayout
+					&& "com.android.systemui.statusbar.phone.PhoneStatusBarView".equals(current.getClass().getName())) {
+				phoneStatusbarView = (FrameLayout) current;
+				break;
 			}
-		});
+			ViewParent parent = current.getParent();
+			current = parent instanceof View ? (View) parent : null;
+		}
+		if (phoneStatusbarView == null) return;
+
+		boolean rootChanged = mPhoneStatusbarView != phoneStatusbarView;
+		mPhoneStatusbarView = phoneStatusbarView;
+
+		if (rootChanged) {
+			/* A recreated status bar owns a new notification/Compose hierarchy.
+			 * Never place an overlay into one of the old display's wrappers. */
+			mCanaryClockAttached = false;
+			mNotificationIconContainer = null;
+			mNotificationContainerContainer = null;
+			mLeftVerticalSplitContainer = null;
+			mLeftExtraRowContainer = null;
+			mCenteredIconArea = null;
+		}
+
+		View clock = mPhoneStatusbarView.findViewById(idOf("clock"));
+		if (clock instanceof TextView) {
+			mClockView = (TextView) clock;
+		}
+
+		View startSide = mPhoneStatusbarView.findViewById(idOf("status_bar_start_side_except_heads_up"));
+		mStatusbarStartSide = startSide instanceof ViewGroup ? (ViewGroup) startSide : null;
+
+		View systemIconArea = mPhoneStatusbarView.findViewById(idOf("statusIcons"));
+		mSystemIconArea = systemIconArea instanceof LinearLayout ? (LinearLayout) systemIconArea : null;
+
 	}
 
-	private boolean isLegacyClockReady() {
-		return mClockView != null
-				&& mClockView.getParent() instanceof ViewGroup
-				&& mClockView.isAttachedToWindow();
+	private boolean shouldUseCanaryOverlay() {
+		return shouldRenderCanaryOverlay()
+				&& mCanaryClockAttached
+				&& mCanaryClockOverlay != null
+				&& mCanaryClockOverlay.isAttachedToWindow()
+				&& mCanaryClockOverlay.getVisibility() == VISIBLE;
+	}
+
+	private boolean shouldRenderCanaryOverlay() {
+		/* Preserve the stock Compose renderer when PixelXpert is not changing the
+		 * clock. Besides avoiding needless view work this also makes a user who
+		 * resets every option return to the exact CANARY default. */
+		return mModernStatusBar
+				&& (clockPosition != POSITION_LEFT
+				|| notificationAreaMultiRow
+				|| mShowSeconds
+				|| mAmPmStyle != AM_PM_STYLE_GONE
+				|| !(mStringFormatBefore + mStringFormatAfter).trim().isEmpty()
+				|| clockColor != null
+				|| mBeforeClockColor != null
+				|| mAfterClockColor != null);
+	}
+
+	private void refreshClockRenderer() {
+		if (!mModernStatusBar) {
+			removeCanaryClockOverlay();
+			placeClock();
+			updateClock();
+			return;
+		}
+		if (mPhoneStatusbarView == null) return;
+		if (!shouldRenderCanaryOverlay()) {
+			/* If a customized overlay was already visible, keep it as a temporary
+			 * fallback. Lambda7's after-hook removes it only after ClockKt has
+			 * rendered the stock clock again, preventing a blank hand-over. */
+			if (mCanaryClockOverlay != null && mCanaryClockOverlay.getParent() != null) {
+				refreshCanaryClockText();
+			}
+			return;
+		}
+
+		ensureCanaryClockOverlay();
+		if (mCanaryClockOverlay == null) return;
+		placeCanaryClockOverlay();
+		mCanaryClockOverlay.setVisibility(VISIBLE);
+		refreshCanaryClockText();
+		mCanaryClockAttached = mCanaryClockOverlay.isAttachedToWindow();
+
+		if (mCanaryClockAttached) {
+			scheduleCanaryClockTick();
+		} else {
+			/* Do not suppress ClockKt until our native view is on screen. A
+			 * follow-up root recomposition performs the hand-over after attach;
+			 * this favors the stock clock for one frame over a possible blank one. */
+			mCanaryClockOverlay.post(() -> {
+				if (mCanaryClockOverlay == null || !shouldRenderCanaryOverlay()) return;
+				placeCanaryClockOverlay();
+				mCanaryClockAttached = mCanaryClockOverlay.isAttachedToWindow();
+				refreshCanaryClockText();
+				if (mCanaryClockAttached) scheduleCanaryClockTick();
+			});
+		}
+	}
+
+	private void removeCanaryClockOverlay() {
+		if (mCanaryClockOverlay == null) return;
+		mCanaryClockOverlay.removeCallbacks(mCanaryClockTick);
+		ViewParent parent = mCanaryClockOverlay.getParent();
+		if (parent instanceof ViewGroup) {
+			((ViewGroup) parent).removeView(mCanaryClockOverlay);
+		}
+		mCanaryClockOverlay.setVisibility(GONE);
+		mCanaryClockAttached = false;
+		setHeights();
+	}
+
+	private boolean belongsToCurrentPhoneStatusbar(View view) {
+		View current = view;
+		while (current != null) {
+			if (current == mPhoneStatusbarView) return true;
+			ViewParent parent = current.getParent();
+			current = parent instanceof View ? (View) parent : null;
+		}
+		return false;
+	}
+
+	private void ensureCanaryClockOverlay() {
+		if (mCanaryClockOverlay == null) {
+			mCanaryClockOverlay = new TextView(mContext);
+			mCanaryClockOverlay.setSingleLine(true);
+			mCanaryClockOverlay.setGravity(Gravity.CENTER_VERTICAL);
+			mCanaryClockOverlay.setIncludeFontPadding(false);
+			mCanaryClockOverlay.setLayoutParams(new LinearLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT));
+		} else if (!belongsToCurrentPhoneStatusbar(mCanaryClockOverlay)) {
+			mCanaryClockOverlay.removeCallbacks(mCanaryClockTick);
+			ViewParent parent = mCanaryClockOverlay.getParent();
+			if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(mCanaryClockOverlay);
+			mCanaryClockAttached = false;
+		}
+		copyCanaryClockAppearance();
+	}
+
+	private void copyCanaryClockAppearance() {
+		if (mCanaryClockOverlay == null || mClockView == null) return;
+		try {
+			mCanaryClockOverlay.setTextSize(0, mClockView.getTextSize());
+			mCanaryClockOverlay.setTypeface(mClockView.getTypeface());
+			mCanaryClockOverlay.setLetterSpacing(mClockView.getLetterSpacing());
+			mCanaryClockOverlay.setFontFeatureSettings(mClockView.getFontFeatureSettings());
+			mCanaryClockOverlay.setTextColor(mClockView.getTextColors());
+		} catch (Throwable ignored) {}
+	}
+
+	private void placeCanaryClockOverlay() {
+		if (mCanaryClockOverlay == null || mPhoneStatusbarView == null) return;
+		ViewGroup targetArea = null;
+		Integer index = null;
+		switch (clockPosition) {
+			case POSITION_LEFT:
+				if (notificationAreaMultiRow && mLeftExtraRowContainer != null) {
+					targetArea = mLeftExtraRowContainer;
+					index = 0;
+				} else {
+					targetArea = mStatusbarStartSide;
+					index = 1;
+				}
+				mCanaryClockOverlay.setPadding(0, 0, leftClockPadding, 0);
+				break;
+			case POSITION_CENTER:
+				if (!(mCenteredIconArea instanceof ViewGroup)) createCenterIconArea();
+				if (mCenteredIconArea instanceof ViewGroup) targetArea = (ViewGroup) mCenteredIconArea;
+				mCanaryClockOverlay.setPadding(rightClockPadding, 0, rightClockPadding, 0);
+				break;
+			case POSITION_RIGHT:
+				if (mSystemIconArea != null && mSystemIconArea.getParent() instanceof ViewGroup) {
+					targetArea = (ViewGroup) mSystemIconArea.getParent();
+				}
+				mCanaryClockOverlay.setPadding(rightClockPadding, 0, 0, 0);
+				break;
+		}
+		if (targetArea == null) return;
+
+		ViewParent parent = mCanaryClockOverlay.getParent();
+		if (parent instanceof ViewGroup && parent != targetArea) {
+			((ViewGroup) parent).removeView(mCanaryClockOverlay);
+		}
+
+		ViewGroup.LayoutParams currentParams = mCanaryClockOverlay.getLayoutParams();
+		if (targetArea instanceof LinearLayout) {
+			LinearLayout.LayoutParams params = currentParams instanceof LinearLayout.LayoutParams
+					? (LinearLayout.LayoutParams) currentParams
+					: new LinearLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT);
+			params.width = WRAP_CONTENT;
+			params.height = MATCH_PARENT;
+			params.gravity = Gravity.CENTER_VERTICAL;
+			mCanaryClockOverlay.setLayoutParams(params);
+		}
+
+		if (mCanaryClockOverlay.getParent() == null) {
+			if (index != null) {
+				targetArea.addView(mCanaryClockOverlay, Math.min(index, targetArea.getChildCount()));
+			} else {
+				targetArea.addView(mCanaryClockOverlay);
+			}
+		} else if (index != null && targetArea.indexOfChild(mCanaryClockOverlay) != Math.min(index, targetArea.getChildCount() - 1)) {
+			targetArea.removeView(mCanaryClockOverlay);
+			targetArea.addView(mCanaryClockOverlay, Math.min(index, targetArea.getChildCount()));
+		}
+	}
+
+	private CharSequence getCanaryClockText() {
+		if (mClockView != null) {
+			try {
+				/* In 系统界面_CANARY.APK the XML Clock's style default is GONE
+				 * (2), while mAmPmStyle itself is final. Keep that platform-owned
+				 * field untouched: the visible overlay appends the user-selected
+				 * AM/PM text below. mShowSeconds is mutable and only controls the
+				 * locale-aware time skeleton returned by getSmallTime(). */
+				setObjectField(mClockView, "mShowSeconds", mShowSeconds);
+				Object calendar = getObjectField(mClockView, "mCalendar");
+				if (calendar != null) callMethod(calendar, "setTimeInMillis", System.currentTimeMillis());
+				Object text = callMethod(mClockView, "getSmallTime");
+				if (text instanceof CharSequence) return (CharSequence) text;
+			} catch (Throwable ignored) {
+				// Use the public fallback until the compatibility Clock is initialized.
+			}
+		}
+
+		java.text.SimpleDateFormat format = new java.text.SimpleDateFormat(
+				android.text.format.DateFormat.is24HourFormat(mContext)
+						? (mShowSeconds ? "HH:mm:ss" : "HH:mm")
+						: (mShowSeconds ? "h:mm:ss" : "h:mm"),
+				java.util.Locale.getDefault());
+		return format.format(new java.util.Date());
+	}
+
+	private boolean shouldAppendCanaryAmPm() {
+		return mAmPmStyle != AM_PM_STYLE_GONE
+				&& !android.text.format.DateFormat.is24HourFormat(mContext);
+	}
+
+	private void refreshCanaryClockText() {
+		if (mCanaryClockOverlay == null) return;
+		try {
+			CharSequence clockText = getCanaryClockText();
+			SpannableStringBuilder result = new SpannableStringBuilder();
+			result.append(getFormattedString(mStringFormatBefore, mBeforeSmall, mBeforeClockColor));
+			int clockStart = result.length();
+			result.append(clockText);
+			if (clockColor != null) {
+				result.setSpan(new NetworkTraffic.TrafficStyle(clockColor), clockStart, result.length(),
+						Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+			}
+			if (shouldAppendCanaryAmPm()) {
+				result.append(getFormattedString("$Ga", mAmPmStyle == AM_PM_STYLE_SMALL, clockColor));
+			}
+			result.append(getFormattedString(mStringFormatAfter, mAfterSmall, mAfterClockColor));
+			mCanaryClockOverlay.setText(result);
+			mCanaryClockOverlay.setContentDescription(result);
+			if (clockColor == null && mClockView != null) {
+				mCanaryClockOverlay.setTextColor(mClockView.getTextColors());
+			}
+			if (getAdditionalInstanceField(mCanaryClockOverlay, "stringFormatCallBack") == null) {
+				FormattedStringCallback callback = () -> {
+					if (mCanaryClockOverlay != null) mCanaryClockOverlay.post(this::refreshCanaryClockText);
+				};
+				stringFormatter.registerCallback(callback);
+				setAdditionalInstanceField(mCanaryClockOverlay, "stringFormatCallBack", callback);
+			}
+		} catch (Throwable ignored) {
+			// A partially created CANARY root must not break the stock Compose clock.
+		}
+	}
+
+	private void scheduleCanaryClockTick() {
+		if (!shouldUseCanaryOverlay()) return;
+		mCanaryClockOverlay.removeCallbacks(mCanaryClockTick);
+		if (!mCanaryClockOverlay.isAttachedToWindow()) return;
+		long interval = mShowSeconds ? 1_000L : 60_000L;
+		long delay = interval - (System.currentTimeMillis() % interval) + 20L;
+		mCanaryClockOverlay.postDelayed(mCanaryClockTick, delay);
 	}
 
 	private void updateClockColor() {
 		if(mClockView == null) return;
 
 		currentClockColor = mClockView.getTextColors().getDefaultColor();
+		if (mCanaryClockOverlay != null && clockColor == null) {
+			mCanaryClockOverlay.setTextColor(mClockView.getTextColors());
+		}
 
 		for (StatusbarTextColorCallback callback : mTextColorCallbacks) {
 			callback.onTextColorChanged(currentClockColor);
@@ -1289,26 +1570,8 @@ public class StatusbarMods extends XposedModPack {
 	//endregion
 
 	//region clock and date related
-	private boolean shouldUseLegacyClock() {
-		return !mModernStatusBar
-				|| clockPosition != POSITION_LEFT
-				|| notificationAreaMultiRow
-				|| mShowSeconds
-				|| mAmPmStyle != AM_PM_STYLE_GONE
-				|| !(mStringFormatBefore + mStringFormatAfter).trim().isEmpty()
-				|| clockColor != null
-				|| mBeforeClockColor != null
-				|| mAfterClockColor != null;
-	}
-
 	private void placeClock() {
-		if (mClockView == null) return;
-		// The Android 17 Compose status bar renders the unmodified default-left
-		// clock itself. Once a PixelXpert clock customization is active, the
-		// legacy Clock is the source of truth and must be placed again after each
-		// StatusBarRoot recomposition.
-		if (mModernStatusBar && clockPosition == POSITION_LEFT
-				&& !notificationAreaMultiRow && !shouldUseLegacyClock()) return;
+		if (mModernStatusBar || mClockView == null) return;
 		if (!(mClockView.getParent() instanceof ViewGroup)) return;
 		ViewGroup parent = (ViewGroup) mClockView.getParent();
 		ViewGroup targetArea = null;
@@ -1327,9 +1590,7 @@ public class StatusbarMods extends XposedModPack {
 				break;
 			case POSITION_CENTER:
 				if (!(mCenteredIconArea instanceof ViewGroup)) createCenterIconArea();
-				if (mCenteredIconArea instanceof ViewGroup) {
-					targetArea = (ViewGroup) mCenteredIconArea;
-				}
+				if (mCenteredIconArea instanceof ViewGroup) targetArea = (ViewGroup) mCenteredIconArea;
 				mClockView.setPadding(rightClockPadding, 0, rightClockPadding, 0);
 				break;
 			case POSITION_RIGHT:
@@ -1339,14 +1600,10 @@ public class StatusbarMods extends XposedModPack {
 				}
 				break;
 		}
-		if (targetArea == null) return;
-		if (parent == targetArea) return;
+		if (targetArea == null || parent == targetArea) return;
 		parent.removeView(mClockView);
-		if (index != null) {
-			targetArea.addView(mClockView, Math.min(index, targetArea.getChildCount()));
-		} else {
-			targetArea.addView(mClockView);
-		}
+		if (index != null) targetArea.addView(mClockView, Math.min(index, targetArea.getChildCount()));
+		else targetArea.addView(mClockView);
 	}
 
 	private final StringFormatter stringFormatter = new StringFormatter();
