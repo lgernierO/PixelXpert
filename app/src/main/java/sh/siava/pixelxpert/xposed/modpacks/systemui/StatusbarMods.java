@@ -810,7 +810,7 @@ public class StatusbarMods extends XposedModPack {
 				.after(Pattern.compile(".*Clock.*")).run(param -> {
 					/* A HOME ClockKt call that was allowed through means stock Compose
 					 * has completed its hand-over; only then retire an old overlay. */
-					if (isCanaryHomeClock(param) && !shouldRenderCanaryOverlay()) {
+								if (isCanaryHomeClock(param) && !shouldRenderCanaryOverlay()) {
 						removeCanaryClockOverlay();
 					}
 				});
@@ -983,9 +983,8 @@ public class StatusbarMods extends XposedModPack {
 		}
 		if (mPhoneStatusbarView == null) return;
 		if (!shouldRenderCanaryOverlay()) {
-			/* If a customized overlay was already visible, keep it as a temporary
-			 * fallback. Lambda7's after-hook removes it only after ClockKt has
-			 * rendered the stock clock again, preventing a blank hand-over. */
+			/* The next permitted HOME ClockKt invocation restores stock Compose.
+			 * Keep the old overlay only until that point to avoid a blank hand-over. */
 			if (mCanaryClockOverlay != null && mCanaryClockOverlay.getParent() != null) {
 				refreshCanaryClockText();
 			}
