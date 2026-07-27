@@ -542,7 +542,14 @@ public class StatusbarMods extends XposedModPack {
 					mCanaryKeyguardShowing = param.args.length > 0
 							&& param.args[0] instanceof Boolean
 							&& (Boolean) param.args[0];
-					if (mCanaryKeyguardShowing) removeCanaryClockOverlay();
+					if (mCanaryKeyguardShowing) {
+						removeCanaryClockOverlay();
+					} else if (mPhoneStatusbarView != null) {
+						/* The HOME root can already be attached when keyguard changes.
+						 * Recreate its custom overlay after unlock rather than waiting for
+						 * an incidental Compose invalidation. */
+						mPhoneStatusbarView.post(this::refreshClockRenderer);
+					}
 					for (ClockVisibilityCallback c : clockVisibilityCallbacks) {
 						try {
 							c.OnVisibilityChanged(!mCanaryKeyguardShowing);
@@ -953,9 +960,7 @@ public class StatusbarMods extends XposedModPack {
 		if (param == null || param.args.length == 0 || mCanaryHomeClockViewModel == null) return false;
 		/* ClockKt has one ClockViewModel parameter. The same identity is retained
 		 * by its generated restart lambda, unlike the Lambda7 stack frame. */
-		return param.args[0] == mCanaryHomeClockViewModel
-				&& mPhoneStatusbarView != null
-				&& mPhoneStatusbarView.isAttachedToWindow();
+		return param.args[0] == mCanaryHomeClockViewModel;
 	}
 
 	private boolean shouldRenderCanaryOverlay() {
