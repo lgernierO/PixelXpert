@@ -145,15 +145,20 @@ public class PackageManager extends XposedModPack {
 			SigningDetailsClass
 					.before("checkCapability")
 					.run(param -> {
-						// CANARY invokes checkCapability(SigningDetails, int) for install
-						// reconciliation; leave digest and other overloads untouched.
+						/* services.jar CANARY invokes checkCapability(SigningDetails, 1/8)
+						 * for package replacement. Capability 4 belongs to permission
+						 * reconciliation and remains limited by the same-package /data
+						 * InstallPackageHelper hook below; do not bypass unrelated
+						 * SigningDetails capabilities or the String/digest overload. */
 						if (PM_AllowMismatchedSignature
 								&& param.args.length == 2
 								&& param.args[0] != null
 								&& "android.content.pm.SigningDetails".equals(param.args[0].getClass().getName())
-								&& param.args[1] instanceof Integer
-								&& !param.args[1].equals(PERMISSION)) {
-							param.setResult(true);
+								&& param.args[1] instanceof Integer) {
+							int capability = (Integer) param.args[1];
+							if (capability == 1 || capability == 8) {
+								param.setResult(true);
+							}
 						}
 					});
 
