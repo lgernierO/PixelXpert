@@ -190,7 +190,7 @@ public class PackageManager extends XposedModPack {
 							if (PM_AllowMismatchedSignature
 										&& param.args.length == 3
 										&& callMethod(param.args[1], "getPackageName").equals(param.args[0])
-									&& ((String) callMethod(param.args[1], "getBaseApkPath")).startsWith("/data")) {
+									&& ((String) callMethod(param.args[1], "getBaseApkPath")).startsWith("/data/")) {
 								param.setResult(true);
 							}
 						} catch (Throwable ignored) {
