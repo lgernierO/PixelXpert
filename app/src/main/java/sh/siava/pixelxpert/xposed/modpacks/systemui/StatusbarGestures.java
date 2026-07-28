@@ -78,6 +78,7 @@ public class StatusbarGestures extends XposedModPack {
 
 		//17QPR1
 		ReflectedClass ShadeInteractorSceneContainerImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
+		ReflectedClass ShadeInteractorImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.domain.interactor.ShadeInteractorImpl");
 		ReflectedClass ShadeSurfaceImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.ShadeSurfaceImpl");
 
 		ShadeSurfaceImplClass
@@ -85,6 +86,13 @@ public class StatusbarGestures extends XposedModPack {
 				.run(this::onStatusBarLongPress);
 
 		ShadeInteractorSceneContainerImplClass
+				.afterConstruction()
+				.run(param -> ShadeInteractorSceneContainerImpl = param.thisObject);
+
+		// CANARY routes status-bar shade commands through ShadeInteractorImpl.  The
+		// SceneContainer implementation remains the active BaseShadeInteractor,
+		// but relying on only that concrete class misses the stable command facade.
+		ShadeInteractorImplClass
 				.afterConstruction()
 				.run(param -> ShadeInteractorSceneContainerImpl = param.thisObject);
 
@@ -178,12 +186,9 @@ public class StatusbarGestures extends XposedModPack {
 			public boolean onFling(@Nullable MotionEvent e1, @NonNull MotionEvent e2, float velocityX, float velocityY) {
 				if (isStatusbarClosed()
 						&& isValidFling(e1, e2, velocityY, .15f, 0.01f)) {
-					if(NotificationPanelViewController != null) { //Pre 17QPR1
-						callMethod(NotificationPanelViewController, "expandToQs");
-					} else {
-						callMethod(ShadeInteractorSceneContainerImpl, "expandQuickSettingsShade", "asdf", null);
+					if (expandQuickSettingsShade()) {
+						return true;
 					}
-					return true;
 				}
 				return false;
 			}
@@ -213,6 +218,28 @@ public class StatusbarGestures extends XposedModPack {
 				return false;
 			}
 		};
+	}
+
+	/**
+	 * The Compose/scene-container SystemUI uses this interface for the same
+	 * command that legacy builds exposed as NotificationPanelViewController
+	 * {@code expandToQs()}.  CANARY no longer has that legacy method.
+	 */
+	private boolean expandQuickSettingsShade() {
+		if (ShadeInteractorSceneContainerImpl != null) {
+			try {
+				callMethod(ShadeInteractorSceneContainerImpl, "expandQuickSettingsShade", "PixelXpert.oneFingerPulldown", null);
+				return true;
+			} catch (Throwable ignored) {}
+		}
+
+		// Kept exclusively as a pre-scene-container fallback.
+		try {
+			callMethod(NotificationPanelViewController, "expandToQs");
+			return true;
+		} catch (Throwable ignored) {
+			return false;
+		}
 	}
 
 	private void collapseQS() {
