@@ -74,9 +74,14 @@ public class ScreenOffKeys extends XposedModPack {
 
 	private ReflectedMethod launchAssistActionMethod;
 	private Object windowMan;
+	private static final long POWER_GESTURE_STATE_TIMEOUT_MS = 1_000L;
+
 	private Object mGestureLauncherService;
 	private final ThreadLocal<Boolean> bypassCameraGestureHook = new ThreadLocal<>();
 	private boolean cameraDoubleTapOverrideEnabled = false;
+	private boolean mPowerGestureScreenOn;
+	private boolean mHasPowerGestureScreenState;
+	private long mLastPowerDownTime;
 	private long mWakeTime = 0;
 
 	VolumeLongPressRunnable mVolumeLongPress = new VolumeLongPressRunnable(PHYSICAL_ACTION_DEFAULT);
@@ -147,7 +152,7 @@ public class ScreenOffKeys extends XposedModPack {
 					if (Boolean.TRUE.equals(bypassCameraGestureHook.get())) return;
 
 					setGestureLauncherService(param.thisObject);
-					boolean screenIsOn = screenIsOn();
+					boolean screenIsOn = screenIsOnForPowerGesture();
 					boolean handled = launchAction(resolveAction(KEYCODE_CAMERA, screenIsOn), screenIsOn, true);
 
 					if (handled) {
@@ -177,11 +182,19 @@ public class ScreenOffKeys extends XposedModPack {
 				.before("onLongPress")
 				.run(param -> {
 					capturePhoneWindowManagerFromPowerRule(param.thisObject);
-					if (!isLongPressComplete(param.args[0])) return;
+					try {
+						int eventAction = (int) callMethod(param.args[0], "getAction");
+						boolean screenIsOn = screenIsOnForPowerGesture();
+						int action = resolveAction(KEYCODE_POWER, screenIsOn);
 
-					boolean screenIsOn = screenIsOn();
-					if (launchAction(resolveAction(KEYCODE_POWER, screenIsOn), screenIsOn, false)) {
-						param.setResult(null);
+						if (action == PHYSICAL_ACTION_DEFAULT) return;
+
+						if (eventAction != ACTION_COMPLETE || launchAction(action, screenIsOn, false)) {
+							// Suppress every phase of a custom gesture: CANARY sends a START
+							// callback before COMPLETE for Assistant and KeyGestureController.
+							param.setResult(null);
+						}
+					} catch (Throwable ignored) {
 					}
 				});
 
@@ -200,6 +213,12 @@ public class ScreenOffKeys extends XposedModPack {
 					try {
 						KeyEvent event = (KeyEvent) param.args[0];
 						int keyCode = event.getKeyCode();
+
+						if (keyCode == KEYCODE_POWER
+								&& event.getAction() == ACTION_DOWN
+								&& event.getRepeatCount() == 0) {
+							notePowerGestureStart(event);
+						}
 
 						if ((keyCode == KEYCODE_VOLUME_UP || keyCode == KEYCODE_VOLUME_DOWN)
 								&& controlFlashWithVolKeys
@@ -299,12 +318,22 @@ public class ScreenOffKeys extends XposedModPack {
 		}
 	}
 
-	private boolean isLongPressComplete(Object event) {
-		try {
-			return (int) callMethod(event, "getAction") == ACTION_COMPLETE;
-		} catch (Throwable ignored) {
-			return false;
+	private void notePowerGestureStart(KeyEvent event) {
+		long downTime = event.getDownTime();
+		if (!mHasPowerGestureScreenState
+				|| downTime - mLastPowerDownTime > ViewConfiguration.getMultiPressTimeout()) {
+			mPowerGestureScreenOn = deviceIsInteractive();
+			mHasPowerGestureScreenState = true;
 		}
+		mLastPowerDownTime = downTime;
+	}
+
+	private boolean screenIsOnForPowerGesture() {
+		if (mHasPowerGestureScreenState
+				&& SystemClock.uptimeMillis() - mLastPowerDownTime <= POWER_GESTURE_STATE_TIMEOUT_MS) {
+			return mPowerGestureScreenOn;
+		}
+		return screenIsOn();
 	}
 
 	private boolean isPowerButtonWake(Object[] args) {
