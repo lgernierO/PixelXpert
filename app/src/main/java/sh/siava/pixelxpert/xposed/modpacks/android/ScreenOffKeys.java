@@ -239,6 +239,90 @@ public class ScreenOffKeys extends XposedModPack {
 				});
 	}
 
+	private boolean hasCustomPowerLongPressAction() {
+		return longPressPowerButtonScreenOff != PHYSICAL_ACTION_DEFAULT
+				|| longPressPowerButtonScreenOn != PHYSICAL_ACTION_DEFAULT;
+	}
+
+	private boolean hasCustomPowerDoublePressAction() {
+		return doublePressPowerButtonScreenOff != PHYSICAL_ACTION_DEFAULT
+				|| doublePressPowerButtonScreenOn != PHYSICAL_ACTION_DEFAULT;
+	}
+
+	private void capturePhoneWindowManager(Object phoneWindowManager) {
+		if (phoneWindowManager == null) return;
+
+		windowMan = phoneWindowManager;
+		captureGestureLauncherService(phoneWindowManager);
+	}
+
+	private void capturePhoneWindowManagerFromPowerRule(Object powerKeyRule) {
+		try {
+			capturePhoneWindowManager(getObjectField(powerKeyRule, "this$0"));
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private void captureGestureLauncherService(Object phoneWindowManager) {
+		try {
+			setGestureLauncherService(getObjectField(phoneWindowManager, "mGestureLauncherService"));
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private void setGestureLauncherService(Object gestureLauncherService) {
+		if (gestureLauncherService == null) return;
+
+		if (mGestureLauncherService != gestureLauncherService) {
+			mGestureLauncherService = gestureLauncherService;
+			cameraDoubleTapOverrideEnabled = false;
+		}
+		refreshCameraDoubleTapOverride();
+	}
+
+	private void refreshCameraDoubleTapOverride() {
+		Object gestureLauncherService = mGestureLauncherService;
+		if (gestureLauncherService == null) return;
+
+		if (hasCustomPowerDoublePressAction()) {
+			try {
+				setObjectField(gestureLauncherService, "mCameraDoubleTapPowerEnabled", true);
+				cameraDoubleTapOverrideEnabled = true;
+			} catch (Throwable ignored) {
+			}
+		} else if (cameraDoubleTapOverrideEnabled) {
+			cameraDoubleTapOverrideEnabled = false;
+			try {
+				callMethod(gestureLauncherService, "updateCameraDoubleTapPowerEnabled");
+			} catch (Throwable ignored) {
+			}
+		}
+	}
+
+	private boolean isLongPressComplete(Object event) {
+		try {
+			return (int) callMethod(event, "getAction") == ACTION_COMPLETE;
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
+	private boolean isPowerButtonWake(Object[] args) {
+		for (int i = args.length - 1; i >= 0; i--) {
+			if (args[i] instanceof Integer) {
+				return (int) args[i] == WAKE_REASON_POWER_BUTTON;
+			}
+		}
+		return false;
+	}
+
+	private Object getGestureLauncherService() {
+		if (mGestureLauncherService == null) {
+			captureGestureLauncherService(windowMan);
+		}
+		return mGestureLauncherService;
+	}
+
 	private void handleFlashKeys(KeyEvent event, Handler handler) {
 		int action = event.getAction();
 
