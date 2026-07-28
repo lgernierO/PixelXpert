@@ -421,16 +421,29 @@ public class ScreenOffKeys extends XposedModPack {
 				case PHYSICAL_ACTION_CAMERA:
 					try {
 						Object gestureLauncherService = getGestureLauncherService();
-						handled = (boolean) callMethod(gestureLauncherService, "handleCameraGesture", false, CAMERA_LAUNCH_SOURCE_POWER_DOUBLE_TAP);
-						shouldSleep = false;
+						if (gestureLauncherService != null) {
+							// Re-enter the real system implementation without invoking this hook again.
+							bypassCameraGestureHook.set(true);
+							try {
+								handled = (boolean) callMethod(gestureLauncherService,
+										"handleCameraGesture",
+										false,
+										CAMERA_LAUNCH_SOURCE_POWER_DOUBLE_TAP);
+							} finally {
+								bypassCameraGestureHook.remove();
+							}
+							shouldSleep = false;
+						}
 					} catch (Throwable ignored) {
 					}
 					break;
 				case PHYSICAL_ACTION_ASSISTANT:
 					try {
-						launchAssistActionMethod.invoke(windowMan, null, -2, SystemClock.uptimeMillis(), INVOCATION_TYPE_POWER_BUTTON_LONG_PRESS);
-						handled = true;
-						shouldSleep = false;
+						if (windowMan != null && launchAssistActionMethod != null) {
+							launchAssistActionMethod.invoke(windowMan, null, -2, SystemClock.uptimeMillis(), INVOCATION_TYPE_POWER_BUTTON_LONG_PRESS);
+							handled = true;
+							shouldSleep = false;
+						}
 					} catch (Throwable ignored) {
 					}
 					break;
