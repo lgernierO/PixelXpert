@@ -115,115 +115,128 @@ public class ScreenOffKeys extends XposedModPack {
 
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
+		ReflectedClass PhoneWindowManagerClass = ReflectedClass.of("com.android.server.policy.PhoneWindowManager");
+		ReflectedClass PowerKeyRuleClass = ReflectedClass.of("com.android.server.policy.PhoneWindowManager$PowerKeyRule");
+		ReflectedClass GestureLauncherServiceClass = ReflectedClass.of("com.android.server.GestureLauncherService");
+
 		try {
-			ReflectedClass PhoneWindowManagerClass = ReflectedClass.of("com.android.server.policy.PhoneWindowManager");
-			ReflectedClass PowerKeyRuleClass = ReflectedClass.of("com.android.server.policy.PhoneWindowManager$PowerKeyRule");
-			ReflectedClass GestureLauncherServiceClass = ReflectedClass.of("com.android.server.GestureLauncherService");
-
-			launchAssistActionMethod = ReflectedMethod.ofName(PhoneWindowManagerClass, "launchAssistAction");
-
-			GestureLauncherServiceClass.before("handleCameraGesture").run(param -> {
-				boolean screenIsOn = screenIsOn();
-
-				boolean handled = launchAction(resolveAction(KEYCODE_CAMERA, screenIsOn),
-						screenIsOn,
-						true);
-
-				if (handled)
-					param.setResult(true);
-			});
-
-			PhoneWindowManagerClass
-					.after("enableScreen")
-					.run(param -> {
-						windowMan = param.thisObject;
-
-						setObjectField(getObjectField(param.thisObject, "mGestureLauncherService"),
-								"mCameraDoubleTapPowerEnabled",
-								true);
-					});
-
-			PowerKeyRuleClass
-					.before("onLongPress")
-					.run(param -> {
-						try { //TODO: no need to try/catch once QPR1 stable is released
-							if ((int) callMethod(
-									param.args[0],
-									"getAction")
-									!= ACTION_COMPLETE)
-								return;
-						} catch (Throwable ignored){}
-
-						boolean screenIsOn = screenIsOn();
-
-						if (launchAction(resolveAction(KEYCODE_POWER, screenIsOn),
-								screenIsOn,
-								false))
-							param.setResult(null);
-					});
-
-			Class<?>[] params = PhoneWindowManagerClass.findMethods(Pattern.compile("startedWakingUp")).iterator().next().getParameterTypes();
-			for(int i = 0; i < params.length; i++)
-			{
-				if(params[i].equals(int.class))
-				{
-					mPowerReasonParam = i;
-				}
-			}
-
-			PhoneWindowManagerClass
-					.before("startedWakingUp")
-					.run(param -> {
-						if ((int) param.args[mPowerReasonParam] == WAKE_REASON_POWER_BUTTON) {
-							mWakeTime = SystemClock.uptimeMillis();
-						}
-					});
-
-			PhoneWindowManagerClass
-					.before("interceptKeyBeforeQueueing")
-					.run(param -> {
-						try {
-							KeyEvent event = (KeyEvent) param.args[0];
-							int keyCode = event.getKeyCode();
-
-							if ((keyCode == KEYCODE_VOLUME_UP || keyCode == KEYCODE_VOLUME_DOWN)
-									&& controlFlashWithVolKeys
-									&& isFlashOn()) {
-								Handler handler = (Handler) getObjectField(param.thisObject, "mHandler");
-								handleFlashKeys(event, handler);
-								param.setResult(0);
-								return;
-							}
-
-							if (!deviceIsInteractive() &&
-									((keyCode == KEYCODE_VOLUME_UP && longPressVolumeUpButtonScreenOff != PHYSICAL_ACTION_DEFAULT) ||
-											(keyCode == KEYCODE_VOLUME_DOWN && longPressVolumeDownButtonScreenOff != PHYSICAL_ACTION_DEFAULT))) {
-								Handler handler = (Handler) getObjectField(param.thisObject, "mHandler");
-
-								switch (event.getAction()) {
-									case KeyEvent.ACTION_UP:
-										if (handler.hasCallbacks(mVolumeLongPress)) {
-											AudioManager().adjustStreamVolume(AudioManager.STREAM_MUSIC, keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ? AudioManager.ADJUST_LOWER : AudioManager.ADJUST_RAISE, 0);
-											handler.removeCallbacks(mVolumeLongPress);
-											param.setResult(0);
-										}
-										return;
-									case KeyEvent.ACTION_DOWN:
-										int action = resolveAction(keyCode, false);
-
-										mVolumeLongPress = new VolumeLongPressRunnable(action);
-										if (isActionLaunchable(action)) {
-											handler.postDelayed(mVolumeLongPress, ViewConfiguration.getLongPressTimeout());
-											param.setResult(0);
-										}
-										break;
-								}
-							}
-						} catch (Throwable ignored) {
-						}
-					});
+			// CANARY keeps this four-argument overload alongside a five-argument variant.
+			// Selecting by name alone is nondeterministic and can make the Assistant action fail.
+			launchAssistActionMethod = ReflectedMethod.ofExactData(
+					PhoneWindowManagerClass,
+					"launchAssistAction",
+					String.class,
+					int.class,
+					long.class,
+					int.class);
 		} catch (Throwable ignored) {
+			launchAssistActionMethod = ReflectedMethod.ofName(PhoneWindowManagerClass, "launchAssistAction");
 		}
+
+		GestureLauncherServiceClass
+				.afterConstruction()
+				.run(param -> setGestureLauncherService(param.thisObject));
+
+		GestureLauncherServiceClass
+				.after("updateCameraDoubleTapPowerEnabled")
+				.run(param -> setGestureLauncherService(param.thisObject));
+
+		GestureLauncherServiceClass
+				.before("handleCameraGesture")
+				.run(param -> {
+					if (Boolean.TRUE.equals(bypassCameraGestureHook.get())) return;
+
+					setGestureLauncherService(param.thisObject);
+					boolean screenIsOn = screenIsOn();
+					boolean handled = launchAction(resolveAction(KEYCODE_CAMERA, screenIsOn), screenIsOn, true);
+
+					if (handled) {
+						param.setResult(true);
+					}
+				});
+
+		PhoneWindowManagerClass
+				.after("init")
+				.run(param -> capturePhoneWindowManager(param.thisObject));
+
+		PhoneWindowManagerClass
+				.after("systemReady")
+				.run(param -> capturePhoneWindowManager(param.thisObject));
+
+		// CANARY only schedules this method when the framework's own setting has a
+		// long-press behavior. A configured PixelXpert mapping must opt in itself.
+		PowerKeyRuleClass
+				.after("supportLongPress")
+				.run(param -> {
+					if (hasCustomPowerLongPressAction()) {
+						param.setResult(true);
+					}
+				});
+
+		PowerKeyRuleClass
+				.before("onLongPress")
+				.run(param -> {
+					capturePhoneWindowManagerFromPowerRule(param.thisObject);
+					if (!isLongPressComplete(param.args[0])) return;
+
+					boolean screenIsOn = screenIsOn();
+					if (launchAction(resolveAction(KEYCODE_POWER, screenIsOn), screenIsOn, false)) {
+						param.setResult(null);
+					}
+				});
+
+		PhoneWindowManagerClass
+				.before("startedWakingUp")
+				.run(param -> {
+					if (isPowerButtonWake(param.args)) {
+						mWakeTime = SystemClock.uptimeMillis();
+					}
+				});
+
+		PhoneWindowManagerClass
+				.before("interceptKeyBeforeQueueing")
+				.run(param -> {
+					capturePhoneWindowManager(param.thisObject);
+					try {
+						KeyEvent event = (KeyEvent) param.args[0];
+						int keyCode = event.getKeyCode();
+
+						if ((keyCode == KEYCODE_VOLUME_UP || keyCode == KEYCODE_VOLUME_DOWN)
+								&& controlFlashWithVolKeys
+								&& isFlashOn()) {
+							Handler handler = (Handler) getObjectField(param.thisObject, "mHandler");
+							handleFlashKeys(event, handler);
+							param.setResult(0);
+							return;
+						}
+
+						if (!deviceIsInteractive() &&
+								((keyCode == KEYCODE_VOLUME_UP && longPressVolumeUpButtonScreenOff != PHYSICAL_ACTION_DEFAULT) ||
+										(keyCode == KEYCODE_VOLUME_DOWN && longPressVolumeDownButtonScreenOff != PHYSICAL_ACTION_DEFAULT))) {
+							Handler handler = (Handler) getObjectField(param.thisObject, "mHandler");
+
+							switch (event.getAction()) {
+								case KeyEvent.ACTION_UP:
+									if (handler.hasCallbacks(mVolumeLongPress)) {
+										AudioManager().adjustStreamVolume(AudioManager.STREAM_MUSIC, keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ? AudioManager.ADJUST_LOWER : AudioManager.ADJUST_RAISE, 0);
+										handler.removeCallbacks(mVolumeLongPress);
+										param.setResult(0);
+									}
+									return;
+								case KeyEvent.ACTION_DOWN:
+									int action = resolveAction(keyCode, false);
+
+									mVolumeLongPress = new VolumeLongPressRunnable(action);
+									if (isActionLaunchable(action)) {
+										handler.postDelayed(mVolumeLongPress, ViewConfiguration.getLongPressTimeout());
+										param.setResult(0);
+									}
+									break;
+							}
+						}
+					} catch (Throwable ignored) {
+					}
+				});
 	}
 
 	private void handleFlashKeys(KeyEvent event, Handler handler) {
