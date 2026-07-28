@@ -420,7 +420,7 @@ public class ScreenOffKeys extends XposedModPack {
 					break;
 				case PHYSICAL_ACTION_CAMERA:
 					try {
-						Object gestureLauncherService = getObjectField(windowMan, "mGestureLauncherService");
+						Object gestureLauncherService = getGestureLauncherService();
 						handled = (boolean) callMethod(gestureLauncherService, "handleCameraGesture", false, CAMERA_LAUNCH_SOURCE_POWER_DOUBLE_TAP);
 						shouldSleep = false;
 					} catch (Throwable ignored) {
