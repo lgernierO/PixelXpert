@@ -149,7 +149,12 @@ public class ScreenOffKeys extends XposedModPack {
 		GestureLauncherServiceClass
 				.before("handleCameraGesture")
 				.run(param -> {
-					if (Boolean.TRUE.equals(bypassCameraGestureHook.get())) return;
+					if (Boolean.TRUE.equals(bypassCameraGestureHook.get())
+							|| param.args.length < 2
+							|| !(param.args[1] instanceof Integer)
+							|| (int) param.args[1] != CAMERA_LAUNCH_SOURCE_POWER_DOUBLE_TAP) {
+						return;
+					}
 
 					setGestureLauncherService(param.thisObject);
 					boolean screenIsOn = screenIsOnForPowerGesture();
