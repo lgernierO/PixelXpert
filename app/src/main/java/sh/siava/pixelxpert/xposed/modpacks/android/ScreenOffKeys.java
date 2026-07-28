@@ -32,8 +32,6 @@ import android.view.ViewConfiguration;
 
 import org.apache.commons.lang3.SystemProperties;
 
-import java.util.regex.Pattern;
-
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.FrameworkModPack;
@@ -74,8 +72,11 @@ public class ScreenOffKeys extends XposedModPack {
 
 	private static boolean controlFlashWithVolKeys = false;
 
-	ReflectedMethod launchAssistActionMethod;
+	private ReflectedMethod launchAssistActionMethod;
 	private Object windowMan;
+	private Object mGestureLauncherService;
+	private final ThreadLocal<Boolean> bypassCameraGestureHook = new ThreadLocal<>();
+	private boolean cameraDoubleTapOverrideEnabled = false;
 	private long mWakeTime = 0;
 
 	VolumeLongPressRunnable mVolumeLongPress = new VolumeLongPressRunnable(PHYSICAL_ACTION_DEFAULT);
@@ -83,7 +84,6 @@ public class ScreenOffKeys extends XposedModPack {
 	final Object mLock = new Object();
 	boolean mKeyIsDown = false;
 	boolean mLoopRan = false;
-	int mPowerReasonParam = 0;
 
 	public ScreenOffKeys(Context context) {
 		super(context);
@@ -107,6 +107,8 @@ public class ScreenOffKeys extends XposedModPack {
 			AnimateFlashlight = Xprefs.getBoolean("AnimateFlashlight", false);
 			//noinspection ResultOfMethodCallIgnored
 			CameraManager(); //init CameraManager to listen to flash status
+
+			refreshCameraDoubleTapOverride();
 		} catch (Throwable ignored) {
 		}
 	}
