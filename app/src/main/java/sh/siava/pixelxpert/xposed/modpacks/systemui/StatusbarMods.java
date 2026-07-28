@@ -302,6 +302,17 @@ public class StatusbarMods extends XposedModPack {
 		if (SBNIC != null) {
 			setObjectField(SBNIC, "maxIcons", NotificationIconLimit);
 		}
+		/*
+		 * CANARY's notification binders read maxIcons only when their icon flow
+		 * emits. Requesting a new layout is not enough when a preference is
+		 * changed while the current list is stable, so rebind the concrete
+		 * container as well. The ViewModel remains the source of truth; this just
+		 * makes its already-bound collector apply the new limit immediately.
+		 */
+		if (mNotificationIconContainer != null) {
+			mNotificationIconContainer.requestLayout();
+			mNotificationIconContainer.invalidate();
+		}
 
 		List<Float> paddings = Xprefs.getSliderValues("statusbarPaddings", 0);
 
@@ -381,6 +392,13 @@ public class StatusbarMods extends XposedModPack {
 		if (networkOnSBEnabled) {
 			networkTrafficSB = NetworkTraffic.getInstance(mContext, true);
 			networkTrafficSB.update();
+		} else if (networkTrafficSB != null) {
+			/* Detach the singleton when disabled. Leaving it in the recreated
+			 * CANARY root keeps a stale, invisible view in the icon row. */
+			try {
+				ViewParent parent = networkTrafficSB.getParent();
+				if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(networkTrafficSB);
+			} catch (Throwable ignored) {}
 		}
 		placeNTSB();
 
@@ -587,7 +605,12 @@ public class StatusbarMods extends XposedModPack {
 						AODNIC = param.thisObject;
 						setObjectField(AODNIC, "maxIcons", NotificationAODIconLimit);
 					});
+			}
 
+		/* The status-bar ViewModel is independent of the AOD ViewModel in the
+		 * target APK. Keep the hooks separate: an optional AOD implementation
+		 * must not silently disable the HOME notification-area limit. */
+		if (NotificationIconContainerStatusBarViewModelClass.getClazz() != null) {
 			NotificationIconContainerStatusBarViewModelClass
 					.afterConstruction()
 					.run(param -> {
@@ -697,6 +720,16 @@ public class StatusbarMods extends XposedModPack {
 					public void run() {
 						if (BatteryBarView.hasInstance()) {
 							BatteryBarView.getInstance().post(() -> refreshBatteryBar(BatteryBarView.getInstance()));
+						}
+						/* The CANARY status-bar root is recreated/configured independently
+						 * from its Compose children. Reattach our custom children after the
+						 * framework completes the configuration pass. */
+						if (mPhoneStatusbarView != null) {
+							mPhoneStatusbarView.post(() -> {
+								if (BBarEnabled) placeBatteryBar();
+								if (networkOnSBEnabled) placeNTSB();
+								refreshClockRenderer();
+							});
 						}
 					}
 				}, 2000));
@@ -970,6 +1003,10 @@ public class StatusbarMods extends XposedModPack {
 		View systemIconArea = mPhoneStatusbarView.findViewById(idOf("statusIcons"));
 		mSystemIconArea = systemIconArea instanceof LinearLayout ? (LinearLayout) systemIconArea : null;
 
+		View notificationIcons = mPhoneStatusbarView.findViewById(idOf("notificationIcons"));
+		mNotificationIconContainer = notificationIcons instanceof ViewGroup
+				? (ViewGroup) notificationIcons : null;
+
 	}
 
 	private boolean shouldUseCanaryOverlay() {
@@ -1083,6 +1120,11 @@ public class StatusbarMods extends XposedModPack {
 			mCanaryClockOverlay.setSingleLine(true);
 			mCanaryClockOverlay.setGravity(Gravity.CENTER_VERTICAL);
 			mCanaryClockOverlay.setIncludeFontPadding(false);
+			/* The Compose clock is clickable in the stock hierarchy. Preserve
+			 * those affordances on the native replacement instead of creating a
+			 * dead overlay when clock customisation is enabled. */
+			mCanaryClockOverlay.setOnClickListener(new ClickListener());
+			mCanaryClockOverlay.setOnLongClickListener(new ClickListener());
 			mCanaryClockOverlay.setLayoutParams(new LinearLayout.LayoutParams(WRAP_CONTENT, MATCH_PARENT));
 		} else if (!belongsToCurrentPhoneStatusbar(mCanaryClockOverlay)) {
 			mCanaryClockOverlay.removeCallbacks(mCanaryClockTick);
@@ -1408,6 +1450,8 @@ public class StatusbarMods extends XposedModPack {
 	//region statusbar icon holder
 	private Object getStatusbarIconFor(Icon icon, String slotName) {
 		try {
+			if (StatusBarIconClass == null || StatusBarIconClass.getClazz() == null || icon == null)
+				return null;
 			Object statusbarIcon = ObjenesisHelper.newInstance(StatusBarIconClass.getClazz());
 
 			setObjectField(statusbarIcon, "visible", true);
@@ -1419,6 +1463,15 @@ public class StatusbarMods extends XposedModPack {
 			setObjectField(statusbarIcon, "iconLevel", 0);
 			setObjectField(statusbarIcon, "number", 0);
 			setObjectField(statusbarIcon, "contentDescription", slotName);
+			/* StatusBarIconView in 系统界面_CANARY.APK reads shape while applying
+			 * an icon. Objenesis skips field initialisers, so copy the enum value
+			 * from a verified framework instance rather than leaving it null. */
+			try {
+				Class<?> shapeClass = Class.forName("com.android.internal.statusbar.StatusBarIcon$Shape",
+						false, StatusBarIconClass.getClazz().getClassLoader());
+				Object[] shapes = shapeClass.getEnumConstants();
+				if (shapes != null && shapes.length > 0) setObjectField(statusbarIcon, "shape", shapes[0]);
+			} catch (Throwable ignored) {}
 
 			return statusbarIcon;
 		} catch (Throwable ignored) {
@@ -1530,29 +1583,36 @@ public class StatusbarMods extends XposedModPack {
 	}
 
 	private void setSBIconSlot(String slot, Object holder) {
-		View statusbarView = mPhoneStatusbarView;
 		Object iconController = mStatusBarIconController;
-		if (statusbarView == null || iconController == null || holder == null) return;
+		if (iconController == null || holder == null) return;
 
-		statusbarView.post(() -> {
+		/* The controller can be constructed before PhoneStatusBarView is attached
+		 * in CANARY. Posting to whichever view happens to exist used to drop IMS
+		 * icons during that race; use the main thread when the root is not ready. */
+		Runnable apply = () -> {
 			if (mStatusBarIconController != iconController) return;
 			try {
 				callMethod(iconController, "setIcon", slot, holder);
 			} catch (Throwable ignored) {}
-		});
+		};
+		View statusbarView = mPhoneStatusbarView;
+		if (statusbarView != null) statusbarView.post(apply);
+		else new android.os.Handler(android.os.Looper.getMainLooper()).post(apply);
 	}
 
 	private void removeSBIconSlot(String slot) {
-		View statusbarView = mPhoneStatusbarView;
 		Object iconController = mStatusBarIconController;
-		if (statusbarView == null || iconController == null) return;
+		if (iconController == null) return;
 
-		statusbarView.post(() -> {
+		Runnable remove = () -> {
 			if (mStatusBarIconController != iconController) return;
 			try {
 				callMethod(iconController, "removeAllIconsForSlot", slot, false);
 			} catch (Throwable ignored) {}
-		});
+		};
+		View statusbarView = mPhoneStatusbarView;
+		if (statusbarView != null) statusbarView.post(remove);
+		else new android.os.Handler(android.os.Looper.getMainLooper()).post(remove);
 	}
 	//endregion
 
@@ -1562,8 +1622,9 @@ public class StatusbarMods extends XposedModPack {
 			return;
 		}
 		try {
-			((ViewGroup) networkTrafficSB.getParent()).removeView(networkTrafficSB);
-		} catch (Exception ignored) {
+			ViewParent parent = networkTrafficSB.getParent();
+			if (parent instanceof ViewGroup) ((ViewGroup) parent).removeView(networkTrafficSB);
+		} catch (Throwable ignored) {
 		}
 		if (!networkOnSBEnabled) return;
 
