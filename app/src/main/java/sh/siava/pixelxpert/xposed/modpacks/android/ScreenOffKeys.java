@@ -77,6 +77,7 @@ public class ScreenOffKeys extends XposedModPack {
 	private static final long POWER_GESTURE_STATE_TIMEOUT_MS = 1_000L;
 
 	private Object mGestureLauncherService;
+	private boolean canaryPowerGestureDispatch = false;
 	private final ThreadLocal<Boolean> bypassCameraGestureHook = new ThreadLocal<>();
 	private boolean cameraDoubleTapOverrideEnabled = false;
 	private boolean mPowerGestureScreenOn;
@@ -158,9 +159,15 @@ public class ScreenOffKeys extends XposedModPack {
 
 					setGestureLauncherService(param.thisObject);
 					boolean screenIsOn = screenIsOnForPowerGesture();
-					boolean handled = launchAction(resolveAction(KEYCODE_CAMERA, screenIsOn), screenIsOn, true);
+					int action = resolveAction(KEYCODE_CAMERA, screenIsOn);
+					if (action == PHYSICAL_ACTION_DEFAULT) return;
 
-					if (handled) {
+					// Sensor camera gestures use the same source value. Only replace a launch
+					// after CANARY's physical power-key dispatcher has armed this path.
+					if (!canaryPowerGestureDispatch && !mHasPowerGestureScreenState) return;
+					canaryPowerGestureDispatch = false;
+
+					if (launchAction(action, screenIsOn, true)) {
 						param.setResult(true);
 					}
 				});
@@ -172,6 +179,31 @@ public class ScreenOffKeys extends XposedModPack {
 		PhoneWindowManagerClass
 				.after("systemReady")
 				.run(param -> capturePhoneWindowManager(param.thisObject));
+
+		// Android 16 CANARY dispatches the physical power key through
+		// PhoneWindowManager.handleKeyGesture(KeyEvent, boolean, int) before the
+		// SingleKeyGestureDetector. Its two-argument GestureLauncherService hook
+		// is no longer the reliable entry point for a double press.
+		PhoneWindowManagerClass
+				.before("handleKeyGesture")
+				.run(param -> {
+					capturePhoneWindowManager(param.thisObject);
+					if (param.args.length < 3 || !(param.args[0] instanceof KeyEvent)) return;
+
+					KeyEvent event = (KeyEvent) param.args[0];
+					if (event.getKeyCode() != KEYCODE_POWER || event.getAction() != ACTION_DOWN) return;
+
+					notePowerGestureStart(event);
+					boolean screenIsOn = screenIsOnForPowerGesture();
+					int action = resolveAction(KEYCODE_CAMERA, screenIsOn);
+					if (action == PHYSICAL_ACTION_DEFAULT) return;
+
+					// The CANARY gesture service only gets a chance to detect a double press
+					// when this flag is enabled. Keep its timing/emergency handling intact,
+					// then consume the matching camera launch in the hook below.
+					canaryPowerGestureDispatch = true;
+					refreshCameraDoubleTapOverride();
+				});
 
 		// CANARY only schedules this method when the framework's own setting has a
 		// long-press behavior. A configured PixelXpert mapping must opt in itself.
