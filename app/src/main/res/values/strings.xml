@@ -307,6 +307,8 @@
     <!--Miscellaneous section related-->
     <string name="launcher_section">Launcher options</string>
     <string name="screenshot_sound_disable_title">Disable screenshot sound</string>
+    <string name="screenshot_delay_remove_title">Remove screenshot delay</string>
+    <string name="screenshot_delay_remove_summary">Take a screenshot immediately after Power + Volume Down is recognized</string>
     <!--string name="screenshot_chord_insecure">VolDown+Power unrestricted screenshot</string-->
     <string name="screenshot_insecure">Allow screenshot from restricted content</string>
     <string name="screen_record_insecure">Allow screen recording from restricted content</string>

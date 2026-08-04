@@ -289,6 +289,8 @@
     <!--Miscellaneous section related-->
     <string name="launcher_section">启动器选项</string>
     <string name="screenshot_sound_disable_title">关闭截图提示音</string>
+    <string name="screenshot_delay_remove_title">移除截图延迟</string>
+    <string name="screenshot_delay_remove_summary">识别到电源键和音量减键组合后立即截图</string>
     <!--string name="screenshot_chord_insecure">VolDown+Power unrestricted screenshot</string-->
     <string name="screenshot_insecure">在内容受限时允许截图</string>
     <string name="screen_record_insecure">在内容受限时允许录屏</string>

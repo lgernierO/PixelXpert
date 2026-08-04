@@ -6,6 +6,7 @@ import static android.content.Context.RECEIVER_EXPORTED;
 import static de.robv.android.xposed.XposedHelpers.callMethod;
 import static de.robv.android.xposed.XposedHelpers.getIntField;
 import static de.robv.android.xposed.XposedHelpers.getObjectField;
+import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import static sh.siava.pixelxpert.xposed.utils.SystemUtils.PackageManager;
 
 import android.annotation.SuppressLint;
@@ -36,13 +37,17 @@ public class PhoneWindowManager extends XposedModPack {
 	private List<UserHandle> userHandleList;
 	private String currentPackage = "";
 	private int currentUser = -1;
+	private static volatile boolean removeScreenshotDelay = false;
 
 	public PhoneWindowManager(Context context) {
 		super(context);
 	}
 
 	@Override
-	public void onPreferenceUpdated(String... Key) {}
+	public void onPreferenceUpdated(String... Key) {
+		if (Xprefs == null) return;
+		removeScreenshotDelay = Xprefs.getBoolean("removeScreenshotDelay", false);
+	}
 
 	final BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
 		@Override
@@ -120,6 +125,14 @@ public class PhoneWindowManager extends XposedModPack {
 	@SuppressLint("WrongConstant")
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
+		// Android CANARY schedules the Power + Volume Down screenshot after this
+		// dedicated chord timeout, multiplying it by 2.5 while keyguard is showing.
+		ReflectedClass.ofIfPossible("com.android.server.input.KeyGestureController")
+				.after("getScreenshotChordLongPressDelay")
+				.run(param -> {
+					if (removeScreenshotDelay) param.setResult(0L);
+				});
+
 		//noinspection unchecked
 		userHandleList = (List<UserHandle>) callMethod(SystemUtils.UserManager(), "getProfiles", true);
 
