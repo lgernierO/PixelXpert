@@ -40,7 +40,8 @@
 		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
 			android:defaultValue="false"
 			android:key="removeScreenshotDelay"
-			android:summary="@string/screenshot_delay_remove_summary"
+			android:summaryOff="@string/general_off"
+			android:summaryOn="@string/general_on"
 			android:title="@string/screenshot_delay_remove_title"
 			app:iconSpaceReserved="false" />
 
