@@ -1664,34 +1664,72 @@ public class StatusbarMods extends XposedModPack {
 	//endregion
 
 	//region icon tap related
+	private boolean hasResourceEntryName(View view, String expectedName) {
+		if (view == null || view.getId() == View.NO_ID) return false;
+		try {
+			return expectedName.equals(view.getResources().getResourceEntryName(view.getId()));
+		} catch (Throwable ignored) {
+			/* Runtime-created CANARY overlays have no resource ID. Never let a
+			 * malformed or stale view ID escape from a SystemUI input callback. */
+			return false;
+		}
+	}
+
+	private boolean isClockClickTarget(View view) {
+		return view == mCanaryClockOverlay
+				|| view == mClockView
+				|| hasResourceEntryName(view, "clock");
+	}
+
+	private boolean isDateClickTarget(View view) {
+		return hasResourceEntryName(view, "date");
+	}
+
+	private void startActivityDismissingKeyguard(Intent intent) {
+		Object activityStarter = mActivityStarter;
+		if (activityStarter == null || intent == null) return;
+		try {
+			/* Verified in the target CANARY ActivityStarterImpl: the exact
+			 * (Intent, int) overload remains available. */
+			callMethod(activityStarter, "postStartActivityDismissingKeyguard", intent, 0);
+		} catch (Throwable ignored) {
+			// Input callbacks must never terminate SystemUI during an init race.
+		}
+	}
+
+	private void openDateTimeSettings() {
+		Object activityStarter = mActivityStarter;
+		if (activityStarter == null) return;
+		try {
+			Intent intent = new Intent(Intent.ACTION_MAIN);
+			intent.setClassName("com.android.settings",
+					"com.android.settings.Settings$DateTimeSettingsActivity");
+			/* Settings_CANARY.APK still exports this activity and the target
+			 * ActivityStarterImpl provides startActivity(Intent, boolean). */
+			callMethod(activityStarter, "startActivity", intent, true /* dismissShade */);
+		} catch (Throwable ignored) {
+			// A missing Settings component must not crash the SystemUI process.
+		}
+	}
+
 	class ClickListener implements View.OnClickListener, View.OnLongClickListener {
 		@Override
-		public void onClick(View v) {
-			String name = mContext.getResources().getResourceName(v.getId());
-
-			if (name.endsWith("clock")) {
-				callMethod(mActivityStarter, "postStartActivityDismissingKeyguard", new Intent(AlarmClock.ACTION_SHOW_ALARMS), 0);
-			} else if (name.endsWith("date")) {
+		public void onClick(View view) {
+			if (isClockClickTarget(view)) {
+				startActivityDismissingKeyguard(new Intent(AlarmClock.ACTION_SHOW_ALARMS));
+			} else if (isDateClickTarget(view)) {
 				Uri.Builder builder = CalendarContract.CONTENT_URI.buildUpon();
 				builder.appendPath("time");
 				builder.appendPath(Long.toString(System.currentTimeMillis()));
-				Intent todayIntent = new Intent(Intent.ACTION_VIEW, builder.build());
-				callMethod(mActivityStarter, "postStartActivityDismissingKeyguard", todayIntent, 0);
+				startActivityDismissingKeyguard(new Intent(Intent.ACTION_VIEW, builder.build()));
 			}
 		}
 
 		@Override
-		public boolean onLongClick(View v) {
-			String name = mContext.getResources().getResourceName(v.getId());
-
-			if (name.endsWith("clock") || name.endsWith("date")) {
-				Intent mIntent = new Intent(Intent.ACTION_MAIN);
-				mIntent.setClassName("com.android.settings",
-						"com.android.settings.Settings$DateTimeSettingsActivity");
-				callMethod(mActivityStarter, "startActivity", mIntent, true /* dismissShade */);
-				return true;
-			}
-			return false;
+		public boolean onLongClick(View view) {
+			if (!isClockClickTarget(view) && !isDateClickTarget(view)) return false;
+			openDateTimeSettings();
+			return true;
 		}
 	}
 	//endregion
