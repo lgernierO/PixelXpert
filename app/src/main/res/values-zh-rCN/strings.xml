@@ -243,6 +243,8 @@
     <string name="qs_pulldown_switch_title">快速下拉磁贴面板</string>
     <string name="qs_pulldown_side_title">快速下拉宽度</string>
     <string name="qs_pulldown_category">磁贴面板下拉选项</string>
+    <string name="qs_hide_carrier_text_title">隐藏运营商名称</string>
+    <string name="qs_pulldown_lockscreen_title">锁屏下拉磁贴面板</string>
     <string name="qs_pullup_switch_title">滑动关闭快速设置</string>
     <string name="qs_tile_qty_portrait">竖屏时</string>
     <string name="qs_tile_qty_landscape">横屏时</string>

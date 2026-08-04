@@ -29,7 +29,7 @@ public class QSPrivacy extends XposedModPack {
 	private static final String QUICK_SETTINGS_OVERLAY = "quick_settings_shade";
 
 	private static volatile boolean hideCarrierText;
-	private static volatile boolean disablePullDownOnLockscreen;
+	private static volatile boolean allowPullDownOnLockscreen;
 
 	private final Handler mainHandler = new Handler(Looper.getMainLooper());
 	private final KeyguardManager keyguardManager;
@@ -47,7 +47,7 @@ public class QSPrivacy extends XposedModPack {
 
 		boolean wasHidingCarrierText = hideCarrierText;
 		hideCarrierText = Xprefs.getBoolean("HideQSCarrierText", false);
-		disablePullDownOnLockscreen = Xprefs.getBoolean("DisableQSPulldownOnLockscreen", false);
+		allowPullDownOnLockscreen = Xprefs.getBoolean("QSPulldownOnLockscreen", true);
 
 		if (wasHidingCarrierText != hideCarrierText) {
 			Object controller = carrierGroupController.get();
@@ -112,7 +112,7 @@ public class QSPrivacy extends XposedModPack {
 	}
 
 	private boolean shouldBlockQuickSettingsOnLockscreen() {
-		if (!disablePullDownOnLockscreen || keyguardManager == null) return false;
+		if (allowPullDownOnLockscreen || keyguardManager == null) return false;
 
 		try {
 			return keyguardManager.isKeyguardLocked();
