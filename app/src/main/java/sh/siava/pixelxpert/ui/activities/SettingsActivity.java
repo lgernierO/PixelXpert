@@ -133,7 +133,7 @@ public class SettingsActivity extends BaseActivity implements PreferenceFragment
 			}
 		}
 
-		if (PXPreferences.getBoolean(TargetOptimizer.SYSTEM_RESTART_PENDING_KEY, false)) {
+		if (TargetOptimizer.isSystemRestartPending(this, PXPreferences.getPrefs())) {
 			new MaterialAlertDialogBuilder(this, R.style.MaterialComponents_MaterialAlertDialog)
 					.setTitle(R.string.optimization_restart_needed_title)
 					.setMessage(R.string.optimization_restart_needed_message)
