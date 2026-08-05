@@ -4,6 +4,7 @@ import static android.view.View.GONE;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import static sh.siava.pixelxpert.xposed.utils.reflection.HookHelper.callMethod;
 import static sh.siava.pixelxpert.xposed.utils.reflection.HookHelper.getObjectField;
+import static de.robv.android.xposed.XposedHelpers.setObjectField;
 
 import android.annotation.SuppressLint;
 import android.app.KeyguardManager;
@@ -93,6 +94,8 @@ public class QSPrivacy extends XposedModPack {
 				"com.android.systemui.statusbar.LockscreenShadeTransitionController");
 		ReflectedClass expandableNotificationRowClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.notification.row.ExpandableNotificationRow");
+		ReflectedClass notificationStackSizeCalculatorClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.notification.stack.NotificationStackSizeCalculator");
 		ReflectedClass statusBarKeyguardViewManagerClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager");
 
@@ -140,6 +143,7 @@ public class QSPrivacy extends XposedModPack {
 		blockStatusBarPullDown(statusBarRootKtClass);
 		blockLegacyPullDown(dragDownHelperClass);
 		hookInlineNotificationExpansion(expandableNotificationRowClass);
+		hookInlineNotificationStackHeight(notificationStackSizeCalculatorClass);
 		keepNotificationExpansionOnLockscreen(lockscreenShadeTransitionControllerClass);
 	}
 
@@ -249,6 +253,41 @@ public class QSPrivacy extends XposedModPack {
 				});
 	}
 
+	private void hookInlineNotificationStackHeight(
+			ReflectedClass notificationStackSizeCalculatorClass) {
+		notificationStackSizeCalculatorClass
+				.after("getSpaceNeeded")
+				.run(param -> {
+					if (param.args.length == 5
+							&& isInlineNotificationExpansionAllowed(param.args[0])) {
+						applyInlineNotificationStackHeight(param.args[0], param.getResult());
+					}
+				});
+	}
+
+	private void applyInlineNotificationStackHeight(Object row, Object spaceNeeded) {
+		if (spaceNeeded == null) return;
+
+		try {
+			Number collapsedHeight = callMethod(row, "getMinHeight", true);
+			Number expandedHeight = callMethod(row, "getMaxExpandHeight");
+			Number enoughSpace = getObjectField(spaceNeeded, "whenEnoughSpace");
+			Number savingSpace = getObjectField(spaceNeeded, "whenSavingSpace");
+			if (collapsedHeight == null || expandedHeight == null
+					|| enoughSpace == null || savingSpace == null) {
+				return;
+			}
+
+			float expansionDelta = Math.max(
+					0f, expandedHeight.floatValue() - collapsedHeight.floatValue());
+			setObjectField(spaceNeeded, "whenEnoughSpace",
+					enoughSpace.floatValue() + expansionDelta);
+			setObjectField(spaceNeeded, "whenSavingSpace",
+					savingSpace.floatValue() + expansionDelta);
+		} catch (Throwable ignored) {
+		}
+	}
+
 	private boolean isInlineNotificationExpansionAllowed(Object row) {
 		if (!Boolean.TRUE.equals(inlineExpandedRows.get(row))
 				|| !shouldBlockLockscreenShadePullDown()) {
@@ -275,18 +314,29 @@ public class QSPrivacy extends XposedModPack {
 					|| Boolean.TRUE.equals(callMethod(row, "isChildInGroup"))
 					|| Boolean.TRUE.equals(callMethod(row, "isPromotedOngoing"))
 					|| !Boolean.TRUE.equals(callMethod(row, "isExpandable"))
-					|| Boolean.TRUE.equals(getObjectField(row, "mSaveSpaceOnLockscreen"))
 					|| isPrimaryBouncerShowing()) {
 				return false;
 			}
 
 			ViewParent parent = rowView.getParent();
-			// The CANARY notification stack owns total-height calculation and clipping.
-			// Do not reject a row merely because its expanded content exceeds the
-			// remaining space; that leaves the row at its collapsed height.
-			return parent != null
-					&& "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout"
-					.equals(parent.getClass().getName());
+			if (parent == null || !"com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout"
+					.equals(parent.getClass().getName())) {
+				return false;
+			}
+
+			Object ambientState = getObjectField(parent, "mAmbientState");
+			Object stackBounds = getObjectField(ambientState, "mStackBounds");
+			Number stackTop = getObjectField(stackBounds, "top");
+			Number stackBottom = getObjectField(stackBounds, "bottom");
+			Number expandedHeight = callMethod(row, "getMaxExpandHeight");
+			if (stackTop == null || stackBottom == null || expandedHeight == null) {
+				return false;
+			}
+
+			// Only reject content that cannot fit inside the complete SystemUI
+			// notification region. The stack sizing hook handles every other row.
+			return stackBottom.floatValue() > stackTop.floatValue()
+					&& expandedHeight.floatValue() <= stackBottom.floatValue() - stackTop.floatValue();
 		} catch (Throwable ignored) {
 			return false;
 		}
