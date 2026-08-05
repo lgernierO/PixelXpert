@@ -281,28 +281,12 @@ public class QSPrivacy extends XposedModPack {
 			}
 
 			ViewParent parent = rowView.getParent();
-			if (parent == null || !"com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout"
-					.equals(parent.getClass().getName())) {
-				return false;
-			}
-
-			Object ambientState = getObjectField(parent, "mAmbientState");
-			Object stackBounds = getObjectField(ambientState, "mStackBounds");
-			Number stackTop = getObjectField(stackBounds, "top");
-			Number stackBottom = getObjectField(stackBounds, "bottom");
-			Number actualHeight = getObjectField(row, "mActualHeight");
-			Number expandedHeight = callMethod(row, "getMaxExpandHeight");
-			if (stackTop == null || stackBottom == null || actualHeight == null || expandedHeight == null
-					|| stackBottom.floatValue() <= stackTop.floatValue()) {
-				return false;
-			}
-
-			int[] locationInWindow = new int[2];
-			rowView.getLocationInWindow(locationInWindow);
-			float expandedBottom = locationInWindow[1]
-					+ Math.max(actualHeight.intValue(), expandedHeight.intValue());
-			return locationInWindow[1] >= stackTop.floatValue()
-					&& expandedBottom <= stackBottom.floatValue();
+			// The CANARY notification stack owns total-height calculation and clipping.
+			// Do not reject a row merely because its expanded content exceeds the
+			// remaining space; that leaves the row at its collapsed height.
+			return parent != null
+					&& "com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout"
+					.equals(parent.getClass().getName());
 		} catch (Throwable ignored) {
 			return false;
 		}
