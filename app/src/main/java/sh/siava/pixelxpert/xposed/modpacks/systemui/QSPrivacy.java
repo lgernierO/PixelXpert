@@ -74,6 +74,9 @@ public class QSPrivacy extends XposedModPack {
 		ReflectedClass sceneContainerInteractorClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
 
+		ReflectedClass sceneContainerViewModelClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.scene.ui.viewmodel.SceneContainerViewModel");
+
 		shadeCarrierGroupControllerClass
 				.afterConstruction()
 				.run(param -> {
@@ -94,6 +97,18 @@ public class QSPrivacy extends XposedModPack {
 							&& param.args.length > 0
 							&& isQuickSettingsContent(param.args[0])) {
 						param.setResult(true);
+					}
+				});
+
+		// CANARY checks this callback before every user-driven scene or overlay
+		// change, including a second pull from notification shade into QS.
+		sceneContainerViewModelClass
+				.before("isFalsingAllowingContentChange")
+				.run(param -> {
+					if (shouldBlockQuickSettingsOnLockscreen()
+							&& param.args.length > 1
+							&& isQuickSettingsContent(param.args[1])) {
+						param.setResult(false);
 					}
 				});
 
