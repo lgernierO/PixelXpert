@@ -14,7 +14,10 @@ import android.view.View;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.WeakHashMap;
 
 import io.github.libxposed.api.XposedModuleInterface;
@@ -25,6 +28,8 @@ import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 @SuppressWarnings("RedundantThrows")
 @SystemUIModPack
 public class QSPrivacy extends XposedModPack {
+	private static final String SHADE_SCENE = "shade";
+	private static final String NOTIFICATIONS_SHADE_OVERLAY = "notifications_shade";
 	private static final String QUICK_SETTINGS_SCENE = "quick_settings";
 	private static final String QUICK_SETTINGS_OVERLAY = "quick_settings_shade";
 
@@ -67,15 +72,20 @@ public class QSPrivacy extends XposedModPack {
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam packageReadyParam) throws Throwable {
 		ReflectedClass shadeCarrierGroupControllerClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.shade.carrier.ShadeCarrierGroupController");
+		ReflectedClass shadeHeaderKtClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.shade.ui.composable.ShadeHeaderKt");
 		ReflectedClass disabledContentInteractorClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.scene.domain.interactor.DisabledContentInteractor");
-		ReflectedClass shadeInteractorClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.shade.domain.interactor.ShadeInteractorImpl");
-		ReflectedClass sceneContainerInteractorClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
-
 		ReflectedClass sceneContainerViewModelClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.scene.ui.viewmodel.SceneContainerViewModel");
+		ReflectedClass statusBarRootKtClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt");
+		ReflectedClass dragDownHelperClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.DragDownHelper");
+		ReflectedClass lockscreenShadeTransitionControllerClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.LockscreenShadeTransitionController");
+		ReflectedClass shadeLockscreenInteractorClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.shade.domain.interactor.ShadeLockscreenInteractorImpl");
 
 		shadeCarrierGroupControllerClass
 				.afterConstruction()
@@ -89,44 +99,109 @@ public class QSPrivacy extends XposedModPack {
 					.after(method)
 					.run(param -> applyCarrierTextVisibility(param.thisObject));
 		}
+		hookComposeCarrierText(shadeHeaderKtClass);
 
+		// SceneContainer filters user gesture targets through this exact CANARY method.
 		disabledContentInteractorClass
 				.before("isDisabled")
 				.run(param -> {
-					if (shouldBlockQuickSettingsOnLockscreen()
+					if (shouldBlockLockscreenShadePullDown()
 							&& param.args.length > 0
-							&& isQuickSettingsContent(param.args[0])) {
+							&& isLockscreenShadeContent(param.args[0])) {
 						param.setResult(true);
 					}
 				});
 
-		// CANARY checks this callback before every user-driven scene or overlay
-		// change, including a second pull from notification shade into QS.
+		// Reject only user-driven transitions into either notification or QS shade.
 		sceneContainerViewModelClass
 				.before("isFalsingAllowingContentChange")
 				.run(param -> {
-					if (shouldBlockQuickSettingsOnLockscreen()
+					if (shouldBlockLockscreenShadePullDown()
 							&& param.args.length > 1
-							&& isQuickSettingsContent(param.args[1])) {
+							&& isLockscreenShadeContent(param.args[1])) {
 						param.setResult(false);
 					}
 				});
 
-		blockQuickSettingsExpansion(shadeInteractorClass);
-		blockQuickSettingsExpansion(sceneContainerInteractorClass);
+		blockStatusBarPullDown(statusBarRootKtClass);
+		blockLegacyPullDown(dragDownHelperClass);
+		blockLockscreenShadeTransition(lockscreenShadeTransitionControllerClass,
+				"goToLockedShade", "goToLockedShadeInternal");
+		blockLockscreenShadeTransition(shadeLockscreenInteractorClass,
+				"transitionToExpandedShade");
 	}
 
-	private void blockQuickSettingsExpansion(ReflectedClass interactorClass) {
-		interactorClass
-				.before("expandQuickSettingsShade")
+	private void hookComposeCarrierText(ReflectedClass shadeHeaderKtClass) {
+		shadeHeaderKtClass
+				.before("CarrierTextNoSubscriptionId")
 				.run(param -> {
-					if (shouldBlockQuickSettingsOnLockscreen()) {
+					if (hideCarrierText) {
+						param.setResult(null);
+					}
+				});
+
+		Class<?> shadeHeaderClass = shadeHeaderKtClass.getClazz();
+		if (shadeHeaderClass == null) return;
+
+		try {
+			Set<String> hookNames = new HashSet<>();
+			for (Method method : shadeHeaderClass.getDeclaredMethods()) {
+				String methodName = method.getName();
+				if (method.getReturnType() != Void.TYPE
+						|| !methodName.startsWith("CarrierTextWithSubscriptionId")
+						|| !hookNames.add(methodName)) {
+					continue;
+				}
+				shadeHeaderKtClass
+						.before(methodName)
+						.run(param -> {
+							if (hideCarrierText) {
+								param.setResult(null);
+							}
+						});
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private void blockStatusBarPullDown(ReflectedClass statusBarRootKtClass) {
+		statusBarRootKtClass
+				.before("dispatchAndConsume")
+				.run(param -> {
+					if (shouldBlockLockscreenShadePullDown()) {
+						if (param.args.length > 0) {
+							consumePointerChanges(param.args[0]);
+						}
 						param.setResult(null);
 					}
 				});
 	}
 
-	private boolean shouldBlockQuickSettingsOnLockscreen() {
+	private void blockLegacyPullDown(ReflectedClass dragDownHelperClass) {
+		dragDownHelperClass
+				.after("onInterceptTouchEvent")
+				.run(param -> {
+					if (shouldBlockLockscreenShadePullDown()
+							&& isDraggingDown(param.thisObject)) {
+						callMethod(param.thisObject, "stopDragging");
+						param.setResult(false);
+					}
+				});
+	}
+
+	private void blockLockscreenShadeTransition(ReflectedClass transitionClass, String... methodNames) {
+		for (String methodName : methodNames) {
+			transitionClass
+					.before(methodName)
+					.run(param -> {
+						if (shouldBlockLockscreenShadePullDown()) {
+							param.setResult(null);
+						}
+					});
+		}
+	}
+
+	private boolean shouldBlockLockscreenShadePullDown() {
 		if (allowPullDownOnLockscreen || keyguardManager == null) return false;
 
 		try {
@@ -136,11 +211,33 @@ public class QSPrivacy extends XposedModPack {
 		}
 	}
 
-	private boolean isQuickSettingsContent(Object contentKey) {
+	private boolean isLockscreenShadeContent(Object contentKey) {
 		try {
 			String debugName = getObjectField(contentKey, "debugName");
-			return QUICK_SETTINGS_SCENE.equals(debugName)
+			return SHADE_SCENE.equals(debugName)
+					|| NOTIFICATIONS_SHADE_OVERLAY.equals(debugName)
+					|| QUICK_SETTINGS_SCENE.equals(debugName)
 					|| QUICK_SETTINGS_OVERLAY.equals(debugName);
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
+	private void consumePointerChanges(Object pointerEvent) {
+		try {
+			Object changes = getObjectField(pointerEvent, "changes");
+			if (changes instanceof Iterable<?> pointerChanges) {
+				for (Object change : pointerChanges) {
+					callMethod(change, "consume");
+				}
+			}
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private boolean isDraggingDown(Object dragDownHelper) {
+		try {
+			return Boolean.TRUE.equals(getObjectField(dragDownHelper, "isDraggingDown"));
 		} catch (Throwable ignored) {
 			return false;
 		}
