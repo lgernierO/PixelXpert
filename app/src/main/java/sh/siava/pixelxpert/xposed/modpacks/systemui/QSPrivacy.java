@@ -14,10 +14,7 @@ import android.view.View;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
-import java.lang.reflect.Method;
-import java.util.HashSet;
 import java.util.Map;
-import java.util.Set;
 import java.util.WeakHashMap;
 
 import io.github.libxposed.api.XposedModuleInterface;
@@ -78,14 +75,12 @@ public class QSPrivacy extends XposedModPack {
 				"com.android.systemui.scene.domain.interactor.DisabledContentInteractor");
 		ReflectedClass sceneContainerViewModelClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.scene.ui.viewmodel.SceneContainerViewModel");
+		ReflectedClass modernShadeCarrierGroupClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.pipeline.mobile.ui.view.ModernShadeCarrierGroupMobileView$Companion");
 		ReflectedClass statusBarRootKtClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt");
 		ReflectedClass dragDownHelperClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.DragDownHelper");
-		ReflectedClass lockscreenShadeTransitionControllerClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.statusbar.LockscreenShadeTransitionController");
-		ReflectedClass shadeLockscreenInteractorClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.shade.domain.interactor.ShadeLockscreenInteractorImpl");
 
 		shadeCarrierGroupControllerClass
 				.afterConstruction()
@@ -100,6 +95,7 @@ public class QSPrivacy extends XposedModPack {
 					.run(param -> applyCarrierTextVisibility(param.thisObject));
 		}
 		hookComposeCarrierText(shadeHeaderKtClass);
+		hookModernCarrierText(modernShadeCarrierGroupClass);
 
 		// SceneContainer filters user gesture targets through this exact CANARY method.
 		disabledContentInteractorClass
@@ -125,10 +121,6 @@ public class QSPrivacy extends XposedModPack {
 
 		blockStatusBarPullDown(statusBarRootKtClass);
 		blockLegacyPullDown(dragDownHelperClass);
-		blockLockscreenShadeTransition(lockscreenShadeTransitionControllerClass,
-				"goToLockedShade", "goToLockedShadeInternal");
-		blockLockscreenShadeTransition(shadeLockscreenInteractorClass,
-				"transitionToExpandedShade");
 	}
 
 	private void hookComposeCarrierText(ReflectedClass shadeHeaderKtClass) {
@@ -139,29 +131,17 @@ public class QSPrivacy extends XposedModPack {
 						param.setResult(null);
 					}
 				});
+	}
 
-		Class<?> shadeHeaderClass = shadeHeaderKtClass.getClazz();
-		if (shadeHeaderClass == null) return;
-
-		try {
-			Set<String> hookNames = new HashSet<>();
-			for (Method method : shadeHeaderClass.getDeclaredMethods()) {
-				String methodName = method.getName();
-				if (method.getReturnType() != Void.TYPE
-						|| !methodName.startsWith("CarrierTextWithSubscriptionId")
-						|| !hookNames.add(methodName)) {
-					continue;
-				}
-				shadeHeaderKtClass
-						.before(methodName)
-						.run(param -> {
-							if (hideCarrierText) {
-								param.setResult(null);
-							}
-						});
-			}
-		} catch (Throwable ignored) {
-		}
+	private void hookModernCarrierText(ReflectedClass modernShadeCarrierGroupClass) {
+		modernShadeCarrierGroupClass
+				.after("constructAndBind")
+				.run(param -> {
+					Object carrierGroup = param.getResult();
+					if (carrierGroup instanceof View groupView) {
+						applyTextVisibility(findViewByName(groupView, "mobile_carrier_text"));
+					}
+				});
 	}
 
 	private void blockStatusBarPullDown(ReflectedClass statusBarRootKtClass) {
@@ -178,24 +158,12 @@ public class QSPrivacy extends XposedModPack {
 	}
 
 	private void blockLegacyPullDown(ReflectedClass dragDownHelperClass) {
-		dragDownHelperClass
-				.after("onInterceptTouchEvent")
-				.run(param -> {
-					if (shouldBlockLockscreenShadePullDown()
-							&& isDraggingDown(param.thisObject)) {
-						callMethod(param.thisObject, "stopDragging");
-						param.setResult(false);
-					}
-				});
-	}
-
-	private void blockLockscreenShadeTransition(ReflectedClass transitionClass, String... methodNames) {
-		for (String methodName : methodNames) {
-			transitionClass
+		for (String methodName : new String[]{"onInterceptTouchEvent", "onTouchEvent"}) {
+			dragDownHelperClass
 					.before(methodName)
 					.run(param -> {
 						if (shouldBlockLockscreenShadePullDown()) {
-							param.setResult(null);
+							param.setResult(false);
 						}
 					});
 		}
@@ -235,13 +203,6 @@ public class QSPrivacy extends XposedModPack {
 		}
 	}
 
-	private boolean isDraggingDown(Object dragDownHelper) {
-		try {
-			return Boolean.TRUE.equals(getObjectField(dragDownHelper, "isDraggingDown"));
-		} catch (Throwable ignored) {
-			return false;
-		}
-	}
 
 	private void applyCarrierTextVisibility(Object controller) {
 		if (controller == null) return;
