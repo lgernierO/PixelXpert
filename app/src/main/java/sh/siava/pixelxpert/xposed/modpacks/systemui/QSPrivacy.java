@@ -79,6 +79,8 @@ public class QSPrivacy extends XposedModPack {
 				"com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt");
 		ReflectedClass dragDownHelperClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.DragDownHelper");
+		ReflectedClass lockscreenShadeTransitionControllerClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.LockscreenShadeTransitionController");
 
 		shadeCarrierGroupControllerClass
 				.afterConstruction()
@@ -119,6 +121,7 @@ public class QSPrivacy extends XposedModPack {
 
 		blockStatusBarPullDown(statusBarRootKtClass);
 		blockLegacyPullDown(dragDownHelperClass);
+		keepNotificationExpansionOnLockscreen(lockscreenShadeTransitionControllerClass);
 	}
 
 	private void hookComposeCarrierText(ReflectedClass shadeHeaderKtClass) {
@@ -177,6 +180,21 @@ public class QSPrivacy extends XposedModPack {
 		}
 	}
 
+	private void keepNotificationExpansionOnLockscreen(
+			ReflectedClass lockscreenShadeTransitionControllerClass) {
+		lockscreenShadeTransitionControllerClass
+				.before("goToLockedShade")
+				.run(param -> {
+					// CANARY expands the row separately before requesting this shade transition.
+					if (shouldBlockLockscreenShadePullDown()
+							&& param.args.length == 2
+							&& isExpandableNotificationRow(param.args[0])
+							&& Boolean.TRUE.equals(param.args[1])) {
+						param.setResult(null);
+					}
+				});
+	}
+
 	private boolean shouldBlockLockscreenShadePullDown() {
 		if (allowPullDownOnLockscreen || keyguardManager == null) return false;
 
@@ -197,6 +215,12 @@ public class QSPrivacy extends XposedModPack {
 		} catch (Throwable ignored) {
 			return false;
 		}
+	}
+
+	private boolean isExpandableNotificationRow(Object view) {
+		return view != null
+				&& "com.android.systemui.statusbar.notification.row.ExpandableNotificationRow"
+				.equals(view.getClass().getName());
 	}
 
 	private void consumePointerChanges(Object pointerEvent) {
