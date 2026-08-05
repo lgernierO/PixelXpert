@@ -3,6 +3,7 @@ package sh.siava.pixelxpert.xposed.modpacks.systemui;
 import static android.graphics.Color.TRANSPARENT;
 import static android.view.View.GONE;
 import static android.view.View.VISIBLE;
+import static de.robv.android.xposed.XposedBridge.invokeOriginalMethod;
 import static de.robv.android.xposed.XposedHelpers.getBooleanField;
 import static de.robv.android.xposed.XposedHelpers.setObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
@@ -25,7 +26,9 @@ import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.hardware.camera2.CameraManager;
 import android.util.TypedValue;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -36,6 +39,7 @@ import androidx.annotation.Nullable;
 import androidx.constraintlayout.widget.ConstraintSet;
 
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
 import java.util.regex.Pattern;
 
 import io.github.libxposed.api.XposedModuleInterface;
@@ -86,7 +90,16 @@ public class KeyguardMods extends XposedModPack {
 	//endregion
 
 	//region keyguard bottom area shortcuts and transparency
+	private static final String BOTTOM_START = "bottom_start";
+	private static final String BOTTOM_END = "bottom_end";
+	private static final int INVALID_POINTER_ID = -1;
 	private static boolean transparentBGcolor = false;
+	private static volatile boolean requireShortcutInwardSwipe = false;
+	private static volatile int shortcutInwardSwipeDistanceDp = 48;
+	private boolean shortcutTouchActive;
+	private int shortcutPointerId = INVALID_POINTER_ID;
+	private float shortcutDownRawX;
+	private PendingShortcutLaunch pendingShortcutLaunch;
 	//endregion
 
 	//region hide user avatar
@@ -119,6 +132,11 @@ public class KeyguardMods extends XposedModPack {
 		KeyGuardDimAmount = Xprefs.getSliderFloat( "KeyGuardDimAmount", -1f) / 100f;
 
 		transparentBGcolor = Xprefs.getBoolean("KeyguardBottomButtonsTransparent", false);
+		requireShortcutInwardSwipe = Xprefs.getBoolean("KeyguardShortcutInwardSwipe", false);
+		shortcutInwardSwipeDistanceDp = Xprefs.getSliderInt("KeyguardShortcutInwardSwipeDistance", 48);
+		if (!requireShortcutInwardSwipe) {
+			clearShortcutInwardSwipeState();
+		}
 
 		AnimateFlashlight = Xprefs.getBoolean("AnimateFlashlight", false);
 
@@ -165,6 +183,7 @@ public class KeyguardMods extends XposedModPack {
 		ReflectedClass IconKtClass = ReflectedClass.of("androidx.compose.material3.IconKt");
 		ReflectedClass KeyguardQuickAffordanceViewBinderClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.binder.KeyguardQuickAffordanceViewBinder");
 		ReflectedClass KeyguardQuickAffordanceViewClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.view.KeyguardQuickAffordanceView");
+		ReflectedClass SceneWindowRootViewClass = ReflectedClass.ofIfPossible("com.android.systemui.scene.ui.view.SceneWindowRootView");
 
 		NotificationShadeWindowViewClass
 				.after("onAttachedToWindow")
@@ -214,6 +233,11 @@ public class KeyguardMods extends XposedModPack {
 		KeyguardQuickAffordanceViewClass
 				.after("setBackground")
 				.run(param -> ControlledLaunchableImageViewBackgroundDrawable.captureDrawable(param.getThisObject()));
+
+		hookShortcutInwardSwipe(
+				ShortcutElementProviderClass,
+				NotificationShadeWindowViewClass,
+				SceneWindowRootViewClass);
 
 		ReflectedClass.of(CameraManager.class)
 				.before("setTorchMode")
@@ -375,6 +399,151 @@ public class KeyguardMods extends XposedModPack {
 						setMiddleColor();
 					}
 				});
+	}
+
+	private void hookShortcutInwardSwipe(
+			ReflectedClass shortcutElementProviderClass,
+			ReflectedClass notificationShadeWindowViewClass,
+			ReflectedClass sceneWindowRootViewClass) {
+		shortcutElementProviderClass
+				.before("triggerQuickAffordance")
+				.run(this::deferBottomShortcutLaunch);
+
+		notificationShadeWindowViewClass
+				.before("dispatchTouchEvent")
+				.run(this::trackShortcutTouch);
+		sceneWindowRootViewClass
+				.before("dispatchTouchEvent")
+				.run(this::trackShortcutTouch);
+	}
+
+	private void deferBottomShortcutLaunch(HookHelper.RunParam param) {
+		if (!requireShortcutInwardSwipe
+				|| !shortcutTouchActive
+				|| param.args.length != 2
+				|| !(param.method instanceof Method originalMethod)
+				|| !isLongPressBottomShortcut(param.args[0])) {
+			return;
+		}
+
+		pendingShortcutLaunch = new PendingShortcutLaunch(
+				originalMethod,
+				(Object[]) param.args.clone(),
+				shortcutPointerId,
+				shortcutDownRawX,
+				isLeftHalfOfScreen(shortcutDownRawX));
+		param.setResult(null);
+	}
+
+	private void trackShortcutTouch(HookHelper.RunParam param) {
+		if (!requireShortcutInwardSwipe) {
+			clearShortcutInwardSwipeState();
+			return;
+		}
+		if (param.args.length == 0 || !(param.args[0] instanceof MotionEvent motionEvent)) {
+			return;
+		}
+
+		switch (motionEvent.getActionMasked()) {
+			case MotionEvent.ACTION_DOWN:
+				pendingShortcutLaunch = null;
+				shortcutTouchActive = motionEvent.getPointerCount() == 1;
+				shortcutPointerId = shortcutTouchActive
+						? motionEvent.getPointerId(0)
+						: INVALID_POINTER_ID;
+				shortcutDownRawX = shortcutTouchActive ? motionEvent.getRawX() : 0f;
+				break;
+			case MotionEvent.ACTION_MOVE:
+				confirmPendingShortcutLaunch(motionEvent);
+				break;
+			case MotionEvent.ACTION_UP:
+				confirmPendingShortcutLaunch(motionEvent);
+				clearShortcutInwardSwipeState();
+				break;
+			case MotionEvent.ACTION_CANCEL:
+			case MotionEvent.ACTION_POINTER_DOWN:
+			case MotionEvent.ACTION_POINTER_UP:
+				clearShortcutInwardSwipeState();
+				break;
+		}
+	}
+
+	private void confirmPendingShortcutLaunch(MotionEvent motionEvent) {
+		PendingShortcutLaunch launch = pendingShortcutLaunch;
+		if (launch == null
+				|| !shortcutTouchActive
+				|| motionEvent.getPointerCount() != 1
+				|| launch.pointerId != shortcutPointerId) {
+			return;
+		}
+
+		float horizontalMovement = motionEvent.getRawX() - launch.downRawX;
+		boolean movedOutward = launch.swipeTowardRight
+				? horizontalMovement < 0
+				: horizontalMovement > 0;
+		if (movedOutward && Math.abs(horizontalMovement) > ViewConfiguration.get(mContext).getScaledTouchSlop()) {
+			pendingShortcutLaunch = null;
+			return;
+		}
+
+		float requiredDistancePx = shortcutInwardSwipeDistanceDp
+				* mContext.getResources().getDisplayMetrics().density;
+		boolean reachedInwardDistance = launch.swipeTowardRight
+				? horizontalMovement >= requiredDistancePx
+				: -horizontalMovement >= requiredDistancePx;
+		if (!reachedInwardDistance) {
+			return;
+		}
+
+		pendingShortcutLaunch = null;
+		try {
+			invokeOriginalMethod(launch.method, null, launch.args);
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private boolean isLongPressBottomShortcut(Object viewModel) {
+		try {
+			if (!getBooleanField(viewModel, "useLongPress")) {
+				return false;
+			}
+			Object slotId = getObjectField(viewModel, "slotId");
+			return BOTTOM_START.equals(slotId) || BOTTOM_END.equals(slotId);
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
+	private boolean isLeftHalfOfScreen(float rawX) {
+		return rawX <= mContext.getResources().getDisplayMetrics().widthPixels / 2f;
+	}
+
+	private void clearShortcutInwardSwipeState() {
+		pendingShortcutLaunch = null;
+		shortcutTouchActive = false;
+		shortcutPointerId = INVALID_POINTER_ID;
+		shortcutDownRawX = 0f;
+	}
+
+	private static final class PendingShortcutLaunch {
+		final Method method;
+		final Object[] args;
+		final int pointerId;
+		final float downRawX;
+		final boolean swipeTowardRight;
+
+		PendingShortcutLaunch(
+				Method method,
+				Object[] args,
+				int pointerId,
+				float downRawX,
+				boolean swipeTowardRight) {
+			this.method = method;
+			this.args = args;
+			this.pointerId = pointerId;
+			this.downRawX = downRawX;
+			this.swipeTowardRight = swipeTowardRight;
+		}
 	}
 
 	private void createMiddleTextViews() {

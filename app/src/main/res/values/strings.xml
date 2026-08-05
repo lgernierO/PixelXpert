@@ -99,6 +99,9 @@
     <string name="keyguard_dim_amount_title">Keyguard wallpaper dim</string>
     <string name="keyguard_bottom_category">Bottom area shortcuts</string>
     <string name="keyguard_bottom_buttons_transparent_title">Remove circle around icons</string>
+    <string name="keyguard_shortcut_inward_swipe_title">Require inward swipe after holding a shortcut</string>
+    <string name="keyguard_shortcut_inward_swipe_summary">Hold a bottom shortcut, then swipe toward the center to activate it</string>
+    <string name="keyguard_shortcut_inward_swipe_distance_title">Confirmation swipe distance</string>
     <string name="shufflePin_title">Shuffle Pin</string>
     <string name="wakeup_to_security_title">Show security input on device wake</string>
     <string name="easy_unlock_title">Easy unlock (Pin/Password)</string>

@@ -92,6 +92,9 @@
     <string name="keyguard_dim_amount_title">锁屏壁纸亮度</string>
     <string name="keyguard_bottom_category">底部快捷方式</string>
     <string name="keyguard_bottom_buttons_transparent_title">隐藏图标背景</string>
+    <string name="keyguard_shortcut_inward_swipe_title">长按后向内滑动确认</string>
+    <string name="keyguard_shortcut_inward_swipe_summary">长按底部快捷方式后，向屏幕中央滑动才会打开</string>
+    <string name="keyguard_shortcut_inward_swipe_distance_title">确认滑动距离</string>
     <string name="shufflePin_title">打乱密码盘</string>
     <string name="wakeup_to_security_title">设备唤醒时显示密码输入界面</string>
     <string name="easy_unlock_title">简易解锁 (Pin/密码)</string>

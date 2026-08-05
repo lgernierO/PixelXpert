@@ -166,6 +166,23 @@
 			android:title="@string/keyguard_bottom_buttons_transparent_title"
 			app:iconSpaceReserved="false" />
 
+		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
+			android:defaultValue="false"
+			android:key="KeyguardShortcutInwardSwipe"
+			android:summary="@string/keyguard_shortcut_inward_swipe_summary"
+			android:title="@string/keyguard_shortcut_inward_swipe_title"
+			app:iconSpaceReserved="false" />
+
+		<sh.siava.pixelxpert.ui.preferences.MaterialRangeSliderPreference
+			android:key="KeyguardShortcutInwardSwipeDistance"
+			android:title="@string/keyguard_shortcut_inward_swipe_distance_title"
+			app:defaultValue="48"
+			app:iconSpaceReserved="false"
+			app:maxVal="128"
+			app:minVal="16"
+			app:tickInterval="1"
+			app:valueCount="1" />
+
 	</sh.siava.pixelxpert.ui.preferences.MaterialPreferenceCategory>
 
 	<sh.siava.pixelxpert.ui.preferences.MaterialPreferenceCategory

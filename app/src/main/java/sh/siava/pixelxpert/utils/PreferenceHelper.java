@@ -92,6 +92,9 @@ public class PreferenceHelper {
 			case "carrierTextValue":
 				return instance.mPreferences.getBoolean("carrierTextMod", false);
 
+			case "KeyguardShortcutInwardSwipeDistance":
+				return instance.mPreferences.getBoolean("KeyguardShortcutInwardSwipe", false);
+
 			case "batteryFastChargingColor":
 			case "batteryPowerSaveColor":
 			case "batteryChargingColor":
@@ -248,6 +251,9 @@ public class PreferenceHelper {
 				return KeyGuardDimAmount < 0
 						? fragmentCompat.getString(R.string.word_default)
 						: KeyGuardDimAmount + "%";
+
+			case "KeyguardShortcutInwardSwipeDistance":
+				return instance.mPreferences.getSliderInt("KeyguardShortcutInwardSwipeDistance", 48) + " dp";
 
 			case "BBOpacity":
 				return instance.mPreferences.getSliderInt("BBOpacity", 100) + "%";
