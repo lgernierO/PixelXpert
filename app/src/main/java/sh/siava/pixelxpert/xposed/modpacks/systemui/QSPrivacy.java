@@ -270,18 +270,24 @@ public class QSPrivacy extends XposedModPack {
 
 		try {
 			/*
-			 * CANARY already uses getHeightWithoutLockscreenConstraints() for
-			 * whenEnoughSpace. Do not add the expansion delta again: that would
-			 * double-count this row. Make the saving-space pass account for the
-			 * same height so SystemUI limits later rows instead of re-collapsing
-			 * the notification the user explicitly expanded.
+			 * On keyguard, CANARY normally substitutes a row's collapsed height
+			 * for both fit passes. This row was explicitly expanded by the user,
+			 * so account for its normal height in the complete stack instead. The
+			 * stack calculator retains ownership of later-row hiding and clipping.
 			 */
-			Number enoughSpace = getObjectField(spaceNeeded, "whenEnoughSpace");
+			Number collapsedHeight = callMethod(row, "getMinHeight", true);
+			Number fullHeight = callMethod(row, "getHeightWithoutLockscreenConstraints");
 			Number savingSpace = getObjectField(spaceNeeded, "whenSavingSpace");
-			if (enoughSpace == null || savingSpace == null) return;
+			if (collapsedHeight == null || fullHeight == null || savingSpace == null) {
+				return;
+			}
 
-			setObjectField(spaceNeeded, "whenSavingSpace", Math.max(
-					enoughSpace.floatValue(), savingSpace.floatValue()));
+			float dividerAndGap = Math.max(
+					0f, savingSpace.floatValue() - collapsedHeight.floatValue());
+			float inlineHeight = Math.max(
+					fullHeight.floatValue(), collapsedHeight.floatValue()) + dividerAndGap;
+			setObjectField(spaceNeeded, "whenEnoughSpace", inlineHeight);
+			setObjectField(spaceNeeded, "whenSavingSpace", inlineHeight);
 		} catch (Throwable ignored) {
 		}
 	}
