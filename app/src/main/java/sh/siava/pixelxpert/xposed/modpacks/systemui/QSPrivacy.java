@@ -11,9 +11,11 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.ViewParent;
 import android.widget.TextView;
 
 import java.lang.ref.WeakReference;
+import java.util.Collections;
 import java.util.Map;
 import java.util.WeakHashMap;
 
@@ -36,7 +38,10 @@ public class QSPrivacy extends XposedModPack {
 	private final Handler mainHandler = new Handler(Looper.getMainLooper());
 	private final KeyguardManager keyguardManager;
 	private final Map<View, Integer> hiddenTextVisibilities = new WeakHashMap<>();
+	private final Map<Object, Boolean> inlineExpandedRows =
+			Collections.synchronizedMap(new WeakHashMap<>());
 	private WeakReference<Object> carrierGroupController = new WeakReference<>(null);
+	private WeakReference<Object> keyguardViewManager = new WeakReference<>(null);
 
 	public QSPrivacy(Context context) {
 		super(context);
@@ -48,8 +53,13 @@ public class QSPrivacy extends XposedModPack {
 		if (Xprefs == null) return;
 
 		boolean wasHidingCarrierText = hideCarrierText;
+		boolean wasAllowingPullDown = allowPullDownOnLockscreen;
 		hideCarrierText = Xprefs.getBoolean("HideQSCarrierText", false);
 		allowPullDownOnLockscreen = Xprefs.getBoolean("QSPulldownOnLockscreen", true);
+
+		if (wasAllowingPullDown != allowPullDownOnLockscreen) {
+			inlineExpandedRows.clear();
+		}
 
 		if (wasHidingCarrierText != hideCarrierText) {
 			Object controller = carrierGroupController.get();
@@ -81,6 +91,14 @@ public class QSPrivacy extends XposedModPack {
 				"com.android.systemui.statusbar.DragDownHelper");
 		ReflectedClass lockscreenShadeTransitionControllerClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.LockscreenShadeTransitionController");
+		ReflectedClass expandableNotificationRowClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.notification.row.ExpandableNotificationRow");
+		ReflectedClass statusBarKeyguardViewManagerClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager");
+
+		statusBarKeyguardViewManagerClass
+				.afterConstruction()
+				.run(param -> keyguardViewManager = new WeakReference<>(param.thisObject));
 
 		shadeCarrierGroupControllerClass
 				.afterConstruction()
@@ -121,6 +139,7 @@ public class QSPrivacy extends XposedModPack {
 
 		blockStatusBarPullDown(statusBarRootKtClass);
 		blockLegacyPullDown(dragDownHelperClass);
+		hookInlineNotificationExpansion(expandableNotificationRowClass);
 		keepNotificationExpansionOnLockscreen(lockscreenShadeTransitionControllerClass);
 	}
 
@@ -185,14 +204,128 @@ public class QSPrivacy extends XposedModPack {
 		lockscreenShadeTransitionControllerClass
 				.before("goToLockedShade")
 				.run(param -> {
-					// CANARY expands the row separately before requesting this shade transition.
 					if (shouldBlockLockscreenShadePullDown()
 							&& param.args.length == 2
 							&& isExpandableNotificationRow(param.args[0])
 							&& Boolean.TRUE.equals(param.args[1])) {
+						Object row = param.args[0];
+						if (canKeepNotificationExpandedInline(row)) {
+							inlineExpandedRows.put(row, true);
+							try {
+								// CANARY normally performs this before transitioning to the shade.
+								callMethod(row, "setUserExpanded", true, true);
+								requestNotificationHeightUpdate(row, "PX.inlineLockscreenExpansion");
+							} catch (Throwable ignored) {
+								inlineExpandedRows.remove(row);
+							}
+						}
+
+						// Keep the user on the lock screen even when inline expansion is unsafe.
 						param.setResult(null);
 					}
 				});
+	}
+
+	private void hookInlineNotificationExpansion(ReflectedClass expandableNotificationRowClass) {
+		expandableNotificationRowClass
+				.before("isExpanded")
+				.run(param -> {
+					if (param.args.length == 1
+							&& Boolean.FALSE.equals(param.args[0])
+							&& isInlineNotificationExpansionAllowed(param.thisObject)) {
+						param.setResult(true);
+					}
+				});
+
+		expandableNotificationRowClass
+				.after("setUserExpanded")
+				.run(param -> {
+					if (param.args.length > 0
+							&& Boolean.FALSE.equals(param.args[0])
+							&& inlineExpandedRows.remove(param.thisObject) != null
+							&& shouldBlockLockscreenShadePullDown()) {
+						requestNotificationHeightUpdate(param.thisObject, "PX.inlineLockscreenCollapse");
+					}
+				});
+	}
+
+	private boolean isInlineNotificationExpansionAllowed(Object row) {
+		if (!Boolean.TRUE.equals(inlineExpandedRows.get(row))
+				|| !shouldBlockLockscreenShadePullDown()) {
+			return false;
+		}
+
+		try {
+			return Boolean.TRUE.equals(getObjectField(row, "mUserExpanded"))
+					&& canKeepNotificationExpandedInline(row);
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
+	private boolean canKeepNotificationExpandedInline(Object row) {
+		if (!shouldBlockLockscreenShadePullDown()
+				|| !isExpandableNotificationRow(row)
+				|| !(row instanceof View rowView)) {
+			return false;
+		}
+
+		try {
+			if (Boolean.TRUE.equals(callMethod(row, "shouldShowPublic"))
+					|| Boolean.TRUE.equals(callMethod(row, "isChildInGroup"))
+					|| Boolean.TRUE.equals(callMethod(row, "isPromotedOngoing"))
+					|| !Boolean.TRUE.equals(callMethod(row, "isExpandable"))
+					|| Boolean.TRUE.equals(getObjectField(row, "mSaveSpaceOnLockscreen"))
+					|| isPrimaryBouncerShowing()) {
+				return false;
+			}
+
+			ViewParent parent = rowView.getParent();
+			if (parent == null || !"com.android.systemui.statusbar.notification.stack.NotificationStackScrollLayout"
+					.equals(parent.getClass().getName())) {
+				return false;
+			}
+
+			Object ambientState = getObjectField(parent, "mAmbientState");
+			Object stackBounds = getObjectField(ambientState, "mStackBounds");
+			Number stackTop = getObjectField(stackBounds, "top");
+			Number stackBottom = getObjectField(stackBounds, "bottom");
+			Number actualHeight = getObjectField(row, "mActualHeight");
+			Number expandedHeight = callMethod(row, "getMaxExpandHeight");
+			if (stackTop == null || stackBottom == null || actualHeight == null || expandedHeight == null
+					|| stackBottom.floatValue() <= stackTop.floatValue()) {
+				return false;
+			}
+
+			int[] locationInWindow = new int[2];
+			rowView.getLocationInWindow(locationInWindow);
+			float expandedBottom = locationInWindow[1]
+					+ Math.max(actualHeight.intValue(), expandedHeight.intValue());
+			return locationInWindow[1] >= stackTop.floatValue()
+					&& expandedBottom <= stackBottom.floatValue();
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
+	private boolean isPrimaryBouncerShowing() {
+		Object manager = keyguardViewManager.get();
+		if (manager == null) {
+			return true;
+		}
+
+		try {
+			return Boolean.TRUE.equals(callMethod(manager, "primaryBouncerIsOrWillBeShowing"));
+		} catch (Throwable ignored) {
+			return true;
+		}
+	}
+
+	private void requestNotificationHeightUpdate(Object row, String reason) {
+		try {
+			callMethod(row, "notifyHeightChanged", reason, true);
+		} catch (Throwable ignored) {
+		}
 	}
 
 	private boolean shouldBlockLockscreenShadePullDown() {

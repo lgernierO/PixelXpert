@@ -428,6 +428,7 @@ public class KeyguardMods extends XposedModPack {
 		}
 
 		pendingShortcutLaunch = new PendingShortcutLaunch(
+				param.thisObject,
 				originalMethod,
 				(Object[]) param.args.clone(),
 				shortcutPointerId,
@@ -498,7 +499,7 @@ public class KeyguardMods extends XposedModPack {
 
 		pendingShortcutLaunch = null;
 		try {
-			invokeOriginalMethod(launch.method, null, launch.args);
+			invokeOriginalMethod(launch.method, launch.receiver, launch.args);
 		} catch (Throwable ignored) {
 		}
 	}
@@ -529,6 +530,7 @@ public class KeyguardMods extends XposedModPack {
 	}
 
 	private static final class PendingShortcutLaunch {
+		final Object receiver;
 		final Method method;
 		final Object[] args;
 		final int pointerId;
@@ -536,11 +538,13 @@ public class KeyguardMods extends XposedModPack {
 		final boolean swipeTowardRight;
 
 		PendingShortcutLaunch(
+				Object receiver,
 				Method method,
 				Object[] args,
 				int pointerId,
 				float downRawX,
 				boolean swipeTowardRight) {
+			this.receiver = receiver;
 			this.method = method;
 			this.args = args;
 			this.pointerId = pointerId;
