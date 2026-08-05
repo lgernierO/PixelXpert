@@ -5,7 +5,7 @@
     <string name="xposed_desc">自定义 Google Pixel 设备</string>
     <string name="volume_tile_title">媒体音量</string>
     <string name="sliding_tile_subtitle">点击调整</string>
-    <string name="app_switch_tile_title">Switch App Profile</string>
+    <string name="app_switch_tile_title">切换应用配置文件</string>
     <string name="hide_default">隐藏 (默认)</string>
     <string name="percent_of_default_size">% 默认</string>
     <string name="overlay_none_title">(默认)</string>
@@ -33,7 +33,7 @@
     <string name="update_over_wifi_title">仅通过 WiFi 检查更新</string>
     <string name="update_over_wifi_summary">仅当连接到 WiFi 时才在后台检查更新</string>
     <string name="github_repo_title">GitHub 仓库</string>
-    <string name="telegram_group_title">Telegram channel</string>
+    <string name="telegram_group_title">Telegram 频道</string>
     <string name="usage_title">用途</string>
     <string name="usage_summary">打开 Wiki 页面</string>
     <string name="crowdin_title">翻译到你的语言</string>
@@ -64,7 +64,7 @@
     <string name="hotspot_max_client_title">最大连接数</string>
     <string name="hotspot_disable_approval_title">已绕过热点的问题</string>
     <string name="hotspot_disable_approval_summary">允许非“预先批准”客户端无缝连接</string>
-    <string name="hotspot_force_unsupported_regions">Remove hotspot limitations in unsupported regions</string>
+    <string name="hotspot_force_unsupported_regions">移除不受支持地区的热点限制</string>
     <!--Lock screen related-->
     <string name="depth_wallpaper_options">深度效果的壁纸</string>
     <string name="depth_wallpaper_title">深度效果壁纸</string>
@@ -242,9 +242,9 @@
     <string name="qs_flashlight_level_global_title">全局应用手电筒亮度</string>
     <string name="qs_tile_qty_title">磁贴面板数量设定</string>
     <string name="qs_leveled_flashlight_summary">长按瓷块显示滑动条\n 需要硬件支持</string>
-    <string name="qs_pulldown_size">快速下拉磁贴面板</string>
+    <string name="qs_pulldown_size">快速下拉触发区域宽度</string>
     <string name="qs_pulldown_switch_title">快速下拉磁贴面板</string>
-    <string name="qs_pulldown_side_title">快速下拉宽度</string>
+    <string name="qs_pulldown_side_title">快速下拉触发侧</string>
     <string name="qs_pulldown_category">磁贴面板下拉选项</string>
     <string name="qs_hide_carrier_text_title">隐藏运营商名称</string>
     <string name="qs_pulldown_lockscreen_title">锁屏下拉磁贴面板</string>
@@ -274,7 +274,7 @@
     <string name="three_button_center_title">中按钮</string>
     <string name="three_button_right_title">右按钮</string>
     <string name="hide_navbar_title">隐藏小白条</string>
-    <string name="hide_navbar_insets_title">Hide navigation bar insets</string>
+    <string name="hide_navbar_insets_title">隐藏导航栏占位区域</string>
     <string name="taskbar_as_recents_title">将任务栏替换为 PixelXpert 最近任务栏</string>
     <string name="taskbar_enable_google_recents">在任务栏上启用 Android 最近任务</string>
     <string name="taskbar_height_title">任务栏高度</string>
@@ -283,10 +283,10 @@
     <string name="taskbar_status_title">任务栏</string>
     <string name="taskbar_force_enable_title">强制开启</string>
     <string name="taskbar_force_disable_title">强制关闭</string>
-    <string name="taskbar_transient_title">Auto hide</string>
+    <string name="taskbar_transient_title">自动隐藏</string>
     <string name="taskbar_on_launcher_title">在首页显示</string>
     <string name="remap_physical_buttons_title">重映射物理按钮</string>
-    <string name="taskbar_on_ime_title">显示时打开键盘</string>
+    <string name="taskbar_on_ime_title">键盘打开时显示</string>
     <!-- Package manager -->
     <string name="pm_bypass_signature_title">绕过应用签名检查</string>
     <string name="pm_allow_downgrade_title">允许应用降级</string>
@@ -311,8 +311,8 @@
     <string name="display_resolution_title">显示分辨率</string>
     <string name="brightness_range_title">显示亮度限制</string>
     <string name="brightness_range_not_linear">这个范围不是线性的,有时一个小的差异会导致相当大的变化</string>
-    <string name="so_taptaptorch_title">锁屏双击打开手电筒</string>
-    <string name="so_taptaptorch_summary">锁屏时 双击+长按打开手电筒</string>
+    <string name="so_taptaptorch_title">锁屏双击并按住开启临时手电筒</string>
+    <string name="so_taptaptorch_summary">在锁屏任意位置双击并按住可临时开启手电筒，松手关闭；启用“长按后向内滑动确认”时此功能停用</string>
     <string name="so_fingerprint_sensor_enabled">屏幕关闭时启用指纹传感器</string>
     <string name="so_double_tap_wake_title">双击亮屏</string>
     <string name="so_double_tap_wake_summary">将禁用单击唤醒</string>
@@ -365,7 +365,7 @@
     <string name="vibration_type_notification">强度由系统通知振动设置定义</string>
     <string name="dialer_mute_record_message_title">删除通话录音通知</string>
     <string name="dialer_mute_record_message_summary">仅适用于已启用通话录制的谷歌电话应用</string>
-    <string name="radio_force_volte_nr">Force VoLTE/NR in unsupported regions</string>
+    <string name="radio_force_volte_nr">在不受支持地区强制启用 VoLTE/NR</string>
     <!-- Arrays strings -->
     <!-- Quick pull down -->
     <string name="pull_down_left">左侧</string>
@@ -408,8 +408,8 @@
     <string name="depth_effect_alert_body">使用合适的锁屏壁纸，让前台元素不会阻挡您锁屏上的整个时钟， 确保您锁屏界面的视觉吸引力和功能清晰度。\n\n注：%s.</string>
     <string name="depth_effect_ok_btn">确定</string>
     <!-- Reboot alert -->
-    <string name="pending_actions"></string>
-    <string name="btn_dismiss">Dismiss</string>
+    <string name="pending_actions">待执行操作</string>
+    <string name="btn_dismiss">关闭</string>
     <!-- Menu Items -->
     <string name="menu_settings_title">导入/导出</string>
     <string name="menu_reset_defaults">重置所有设置</string>
@@ -474,14 +474,14 @@
     <string name="hooked_packages_title">已连接的软件包</string>
     <string name="package_hooked_successful">软件包有响应</string>
     <string name="package_not_hook_enabled">软件包未在 LSposed 中启用</string>
-    <string name="enable_px_manually">Pixel Xpert is not yet activated in LSposed. Please open LSposed manager and enable Pixel Xpert, then restart this app</string>
+    <string name="enable_px_manually">Pixel Xpert 尚未在 LSPosed 中激活。请打开 LSPosed 管理器并启用 Pixel Xpert，然后重启本应用</string>
     <string name="package_hook_bootlooped">由于不断重启，hook 失败</string>
     <string name="package_hook_no_response">软件包没有响应</string>
     <string name="package_not_found">软件包未找到</string>
     <string name="package_checking">正在加载 %s</string>
     <string name="package_activated">软件包已成功启动</string>
     <string name="package_activation_failed">软件包启动失败</string>
-    <string name="lsposed_not_found">LSPosed not installed</string>
+    <string name="lsposed_not_found">未安装 LSPosed</string>
     <string name="activate_in_lsposed">在 LSposed 中启用</string>
     <string name="package_not_hook_enabled_info">应用已安装，但 LSPosed 中没有启用 hook。点击\'%s \'启用。</string>
     <string name="package_hook_bootlooped_info">应用的 hook 导致启动循环，因此它已被禁用，以防产生更多问题。</string>
@@ -497,7 +497,7 @@
     <string name="connecting_root_service">正在连接 root 服务…</string>
     <string name="root_access_denied">root 访问被拒绝。请允许 root 访问。</string>
     <string name="root_service_failed">无法连接服务器，请稍后再试</string>
-    <string name="exit">Exit</string>
+    <string name="exit">退出</string>
     <!-- Bottom Navigation -->
     <string name="navigation_home">首页</string>
     <string name="navigation_update">更新</string>
@@ -544,6 +544,6 @@
     <string name="optimization_restart_needed_message">建议重启以提高系统集成度</string>
     <string name="restart_postpone">稍后重启</string>
     <string name="restart_now">立即重启</string>
-    <string name="watts">Watts</string>
-    <string name="fast_charging_threshold_title">Fast charging threshold</string>
+    <string name="watts">瓦</string>
+    <string name="fast_charging_threshold_title">快充阈值</string>
 </resources>
