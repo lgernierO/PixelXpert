@@ -76,7 +76,12 @@ public class ScreenGestures extends XposedModPack {
 	@Override
 	public void onPreferenceUpdated(String... Key) {
 		doubleTapToWake = Xprefs.getBoolean("doubleTapToWake", false);
-		holdScreenTorchEnabled = Xprefs.getBoolean("holdScreenTorchEnabled", false);
+		boolean previousHoldScreenTorchEnabled = holdScreenTorchEnabled;
+		holdScreenTorchEnabled = Xprefs.getBoolean("holdScreenTorchEnabled", false)
+				&& !Xprefs.getBoolean("KeyguardShortcutInwardSwipe", false);
+		if (previousHoldScreenTorchEnabled && !holdScreenTorchEnabled && turnedByTTT) {
+			turnOffTTT();
+		}
 		doubleTapToSleepStatusbarEnabled = Xprefs.getBoolean("DoubleTapSleep", false);
 		doubleTapToSleepLockscreenEnabled = Xprefs.getBoolean("DoubleTapSleepLockscreen", false);
 		TapToShowAmbient = Xprefs.getBoolean("TapToShowAmbient", false);

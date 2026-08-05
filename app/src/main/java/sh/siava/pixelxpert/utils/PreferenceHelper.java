@@ -214,6 +214,8 @@ public class PreferenceHelper {
 					!instance.mPreferences.getBoolean("BBarColorful", false);
 			case "BBarColorful" -> instance.mPreferences.getBoolean("BBarEnabled", false) &&
 					!instance.mPreferences.getBoolean("BBarTransitColors", false);
+			case "holdScreenTorchEnabled" ->
+					!instance.mPreferences.getBoolean("KeyguardShortcutInwardSwipe", false);
 			default -> true;
 		};
 	}
