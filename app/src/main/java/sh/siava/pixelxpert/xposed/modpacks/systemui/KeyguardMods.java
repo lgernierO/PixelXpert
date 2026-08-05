@@ -418,11 +418,12 @@ public class KeyguardMods extends XposedModPack {
 	}
 
 	private void deferBottomShortcutLaunch(HookHelper.RunParam param) {
+		String slotId = getLongPressBottomShortcutSlot(param.args.length > 0 ? param.args[0] : null);
 		if (!requireShortcutInwardSwipe
 				|| !shortcutTouchActive
 				|| param.args.length != 2
 				|| !(param.method instanceof Method originalMethod)
-				|| !isLongPressBottomShortcut(param.args[0])) {
+				|| slotId == null) {
 			return;
 		}
 
@@ -431,7 +432,7 @@ public class KeyguardMods extends XposedModPack {
 				(Object[]) param.args.clone(),
 				shortcutPointerId,
 				shortcutDownRawX,
-				isLeftHalfOfScreen(shortcutDownRawX));
+				shouldSwipeTowardRight(slotId));
 		param.setResult(null);
 	}
 
@@ -502,20 +503,22 @@ public class KeyguardMods extends XposedModPack {
 		}
 	}
 
-	private boolean isLongPressBottomShortcut(Object viewModel) {
+	private String getLongPressBottomShortcutSlot(Object viewModel) {
 		try {
-			if (!getBooleanField(viewModel, "useLongPress")) {
-				return false;
+			if (viewModel == null || !getBooleanField(viewModel, "useLongPress")) {
+				return null;
 			}
-			Object slotId = getObjectField(viewModel, "slotId");
-			return BOTTOM_START.equals(slotId) || BOTTOM_END.equals(slotId);
+			String slotId = getObjectField(viewModel, "slotId");
+			return BOTTOM_START.equals(slotId) || BOTTOM_END.equals(slotId) ? slotId : null;
 		} catch (Throwable ignored) {
-			return false;
+			return null;
 		}
 	}
 
-	private boolean isLeftHalfOfScreen(float rawX) {
-		return rawX <= mContext.getResources().getDisplayMetrics().widthPixels / 2f;
+	private boolean shouldSwipeTowardRight(String slotId) {
+		boolean isRtl = mContext.getResources().getConfiguration().getLayoutDirection()
+				== View.LAYOUT_DIRECTION_RTL;
+		return BOTTOM_START.equals(slotId) != isRtl;
 	}
 
 	private void clearShortcutInwardSwipeState() {
