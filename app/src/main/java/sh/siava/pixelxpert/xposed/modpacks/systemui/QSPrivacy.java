@@ -259,6 +259,7 @@ public class QSPrivacy extends XposedModPack {
 				.after("getSpaceNeeded")
 				.run(param -> {
 					if (param.args.length == 5
+							&& Boolean.TRUE.equals(param.args[4])
 							&& isInlineNotificationExpansionAllowed(param.args[0])) {
 						applyInlineNotificationStackHeight(param.args[0], param.getResult());
 					}
