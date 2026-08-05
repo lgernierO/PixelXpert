@@ -269,21 +269,19 @@ public class QSPrivacy extends XposedModPack {
 		if (spaceNeeded == null) return;
 
 		try {
-			Number collapsedHeight = callMethod(row, "getMinHeight", true);
-			Number expandedHeight = callMethod(row, "getMaxExpandHeight");
+			/*
+			 * CANARY already uses getHeightWithoutLockscreenConstraints() for
+			 * whenEnoughSpace. Do not add the expansion delta again: that would
+			 * double-count this row. Make the saving-space pass account for the
+			 * same height so SystemUI limits later rows instead of re-collapsing
+			 * the notification the user explicitly expanded.
+			 */
 			Number enoughSpace = getObjectField(spaceNeeded, "whenEnoughSpace");
 			Number savingSpace = getObjectField(spaceNeeded, "whenSavingSpace");
-			if (collapsedHeight == null || expandedHeight == null
-					|| enoughSpace == null || savingSpace == null) {
-				return;
-			}
+			if (enoughSpace == null || savingSpace == null) return;
 
-			float expansionDelta = Math.max(
-					0f, expandedHeight.floatValue() - collapsedHeight.floatValue());
-			setObjectField(spaceNeeded, "whenEnoughSpace",
-					enoughSpace.floatValue() + expansionDelta);
-			setObjectField(spaceNeeded, "whenSavingSpace",
-					savingSpace.floatValue() + expansionDelta);
+			setObjectField(spaceNeeded, "whenSavingSpace", Math.max(
+					enoughSpace.floatValue(), savingSpace.floatValue()));
 		} catch (Throwable ignored) {
 		}
 	}
@@ -328,15 +326,16 @@ public class QSPrivacy extends XposedModPack {
 			Object stackBounds = getObjectField(ambientState, "mStackBounds");
 			Number stackTop = getObjectField(stackBounds, "top");
 			Number stackBottom = getObjectField(stackBounds, "bottom");
-			Number expandedHeight = callMethod(row, "getMaxExpandHeight");
-			if (stackTop == null || stackBottom == null || expandedHeight == null) {
+			if (stackTop == null || stackBottom == null) {
 				return false;
 			}
 
-			// Only reject content that cannot fit inside the complete SystemUI
-			// notification region. The stack sizing hook handles every other row.
-			return stackBottom.floatValue() > stackTop.floatValue()
-					&& expandedHeight.floatValue() <= stackBottom.floatValue() - stackTop.floatValue();
+			/*
+			 * The bounds are a readiness/safety check only. A single expanded row
+			 * must not be measured against the whole region here: CANARY's stack
+			 * calculator owns the total height, clipping, and safe-area handling.
+			 */
+			return stackBottom.floatValue() > stackTop.floatValue();
 		} catch (Throwable ignored) {
 			return false;
 		}
