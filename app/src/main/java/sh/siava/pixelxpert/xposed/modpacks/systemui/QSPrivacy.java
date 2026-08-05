@@ -56,9 +56,7 @@ public class QSPrivacy extends XposedModPack {
 			if (controller != null) {
 				mainHandler.post(() -> {
 					applyCarrierTextVisibility(controller);
-					if (!hideCarrierText) {
-						requestCarrierTextRefresh(controller);
-					}
+					requestCarrierTextRefresh(controller);
 				});
 			}
 		}
@@ -136,12 +134,22 @@ public class QSPrivacy extends XposedModPack {
 	private void hookModernCarrierText(ReflectedClass modernShadeCarrierGroupClass) {
 		modernShadeCarrierGroupClass
 				.after("constructAndBind")
-				.run(param -> {
-					Object carrierGroup = param.getResult();
-					if (carrierGroup instanceof View groupView) {
-						applyTextVisibility(findViewByName(groupView, "mobile_carrier_text"));
-					}
-				});
+				.run(param -> applyModernCarrierTextVisibility(param.getResult()));
+	}
+
+	private void applyModernCarrierTextVisibility(Object carrierGroup) {
+		try {
+			Object binding = getObjectField(carrierGroup, "binding");
+			Object carrierBinding = getObjectField(binding, "$shadeCarrierBinding");
+			TextView carrierText = getObjectField(carrierBinding, "$carrierTextView");
+			applyTextVisibility(carrierText);
+			return;
+		} catch (Throwable ignored) {
+		}
+
+		if (carrierGroup instanceof View groupView) {
+			applyTextVisibility(findViewByName(groupView, "mobile_carrier_text"));
+		}
 	}
 
 	private void blockStatusBarPullDown(ReflectedClass statusBarRootKtClass) {
@@ -220,7 +228,7 @@ public class QSPrivacy extends XposedModPack {
 
 				// CANARY keeps keyguard carrier text separate from these QS-only views.
 				applyTextVisibility(findViewByName(groupView, "shade_carrier_text"));
-				applyTextVisibility(findViewByName(groupView, "mobile_carrier_text"));
+				applyModernCarrierTextVisibility(carrierGroup);
 			}
 		} catch (Throwable ignored) {
 		}
