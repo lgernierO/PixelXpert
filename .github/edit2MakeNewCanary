@@ -1,3 +1,4 @@
 Editing this file will trigger the build script for a new canary.
 Adaptation branch build trigger for latest SystemUI status bar compatibility changes.
-Package manager hooks synced with canary for the current services.jar.
+Package manager and physical-button hooks synced with canary for current services.jar.
+Carrier text keeps the native battery-event animation and symmetric resting position.
