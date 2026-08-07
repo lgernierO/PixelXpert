@@ -638,6 +638,10 @@ public class KeyguardMods extends XposedModPack {
 
 		carrierBatteryAnimationPending = false;
 		carrierBatteryAnimationActive = true;
+		try {
+			TextView carrierLabel = getObjectField(carrierTextController, "mView");
+			callMethod(carrierLabel.getParent(), "updateCarrierLabelMargin");
+		} catch (Throwable ignored) {}
 		applyCurrentCarrierTextLayout();
 	}
 
