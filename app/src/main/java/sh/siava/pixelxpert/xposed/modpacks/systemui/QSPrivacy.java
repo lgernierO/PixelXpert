@@ -217,7 +217,7 @@ public class QSPrivacy extends XposedModPack {
 							inlineExpandedRows.put(row, true);
 							try {
 								// CANARY normally performs this before transitioning to the shade.
-								callMethod(row, "setUserExpanded", true, true);
+								setUserExpanded(row, true);
 								requestNotificationHeightUpdate(row, "PX.inlineLockscreenExpansion");
 							} catch (Throwable ignored) {
 								inlineExpandedRows.remove(row);
@@ -228,6 +228,22 @@ public class QSPrivacy extends XposedModPack {
 						param.setResult(null);
 					}
 				});
+	}
+
+	private void setUserExpanded(Object row, boolean expanded) {
+		try {
+			ClassLoader classLoader = row.getClass().getClassLoader();
+			Class<?> reasonClass = Class.forName(
+					"com.android.systemui.statusbar.notification.row.ExpandableNotificationRow$ExpansionReason",
+					false,
+					classLoader);
+			@SuppressWarnings({"rawtypes", "unchecked"})
+			Object reason = Enum.valueOf((Class) reasonClass, "USER_ACTION");
+			callMethod(row, "setUserExpanded", expanded, true, reason);
+		} catch (Throwable ignored) {
+			// Older SystemUI versions expose the two-argument method.
+			callMethod(row, "setUserExpanded", expanded, true);
+		}
 	}
 
 	private void hookInlineNotificationExpansion(ReflectedClass expandableNotificationRowClass) {
