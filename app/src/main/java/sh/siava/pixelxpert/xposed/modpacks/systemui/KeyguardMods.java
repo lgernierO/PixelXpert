@@ -32,6 +32,7 @@ import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -72,6 +73,8 @@ public class KeyguardMods extends XposedModPack {
 	private static boolean customCarrierTextEnabled = false;
 	private static String customCarrierText = "";
 	private static Object carrierTextController;
+	private WeakReference<TextView> carrierTextLayoutView = new WeakReference<>(null);
+	private RelativeLayout.LayoutParams originalCarrierTextLayoutParams;
 
 	final StringFormatter carrierStringFormatter = new StringFormatter();
 	final StringFormatter clockStringFormatter = new StringFormatter();
@@ -147,9 +150,8 @@ public class KeyguardMods extends XposedModPack {
 					break;
 				case "carrierTextValue":
 				case "carrierTextMod":
-					if (customCarrierTextEnabled) {
-						setCarrierText();
-					} else {
+					setCarrierText();
+					if (!customCarrierTextEnabled) {
 						try {
 							callMethod(
 									getObjectField(carrierTextController, "mCarrierTextManager"),
@@ -580,12 +582,47 @@ public class KeyguardMods extends XposedModPack {
 	}
 
 	private void setCarrierText() {
-		if(!customCarrierTextEnabled) return;
-
 		try {
 			TextView mView = getObjectField(carrierTextController, "mView");
-			mView.post(() -> mView.setText(carrierStringFormatter.formatString(customCarrierText)));
+			mView.post(() -> {
+				updateCarrierTextLayout(mView);
+				if (customCarrierTextEnabled) {
+					mView.setText(carrierStringFormatter.formatString(customCarrierText));
+				}
+			});
 		} catch (Throwable ignored) {} //probably not initiated yet
+	}
+
+	private void updateCarrierTextLayout(TextView carrierTextView) {
+		if (!(carrierTextView.getLayoutParams() instanceof RelativeLayout.LayoutParams currentLayoutParams)) {
+			return;
+		}
+
+		TextView previousView = carrierTextLayoutView.get();
+		if (previousView != carrierTextView || originalCarrierTextLayoutParams == null) {
+			carrierTextLayoutView = new WeakReference<>(carrierTextView);
+			originalCarrierTextLayoutParams = new RelativeLayout.LayoutParams(currentLayoutParams);
+		}
+
+		RelativeLayout.LayoutParams layoutParams =
+				new RelativeLayout.LayoutParams(originalCarrierTextLayoutParams);
+		if (customCarrierTextEnabled) {
+			Resources resources = carrierTextView.getResources();
+			int agentIconPlaceholderId = resources.getIdentifier(
+					"keyguard_agent_icon_placeholder", "id", mContext.getPackageName());
+			if (agentIconPlaceholderId != 0
+					&& layoutParams.getRule(RelativeLayout.END_OF) == agentIconPlaceholderId) {
+				// Android 17 places carrier text after an agent-icon slot; restore the old text inset.
+				layoutParams.removeRule(RelativeLayout.END_OF);
+				layoutParams.addRule(RelativeLayout.ALIGN_PARENT_START);
+				int marginId = resources.getIdentifier(
+						"keyguard_carrier_text_margin", "dimen", mContext.getPackageName());
+				if (marginId != 0) {
+					layoutParams.setMarginStart(resources.getDimensionPixelSize(marginId));
+				}
+			}
+		}
+		carrierTextView.setLayoutParams(layoutParams);
 	}
 
 	private void updateMiddleTexts()
