@@ -46,7 +46,8 @@ jobs:
         java-version: '25'
         distribution: temurin
         cache: gradle
-      - run: java --version
+    - name: Java Version
+      run: java --version
 
     - name: Gradlew Permissions
       run: chmod +x gradlew
