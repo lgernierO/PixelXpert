@@ -222,13 +222,30 @@ public class NotificationExpander extends XposedModPack {
 			}
 		}
 
-		if (!expand) {
+		if (Scroller != null) {
+			try {
+				callMethod(Scroller, "requestChildrenUpdate");
+			} catch (Throwable ignored) {
+			}
 			Scroller.requestLayout();
 		}
 
 	}
 
 	private void setRowExpansion(Object row, boolean expand) {
-		callMethod(row, "setUserExpanded", expand, true);
+		try {
+			ClassLoader classLoader = row.getClass().getClassLoader();
+			Class<?> reasonClass = Class.forName(
+					"com.android.systemui.statusbar.notification.row.ExpandableNotificationRow$ExpansionReason",
+					false,
+					classLoader);
+			@SuppressWarnings({"rawtypes", "unchecked"})
+			Object reason = Enum.valueOf((Class) reasonClass,
+					expand ? "USER_ACTION" : "DEFAULT_EXPANDED");
+			callMethod(row, "setUserExpanded", expand, true, reason);
+		} catch (Throwable ignored) {
+			// Older SystemUI versions expose the two-argument method.
+			callMethod(row, "setUserExpanded", expand, true);
+		}
 	}
 }
