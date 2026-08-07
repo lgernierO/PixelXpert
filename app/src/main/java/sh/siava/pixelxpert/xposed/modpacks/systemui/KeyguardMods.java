@@ -599,22 +599,34 @@ public class KeyguardMods extends XposedModPack {
 	}
 
 	private void alignCustomCarrierText(Object keyguardStatusBarView) {
-		if (!customCarrierTextEnabled) return;
-
 		try {
 			TextView carrierLabel = getObjectField(keyguardStatusBarView, "mCarrierLabel");
-			if (!(carrierLabel.getLayoutParams() instanceof ViewGroup.MarginLayoutParams layoutParams)) {
+			if (!(carrierLabel.getLayoutParams() instanceof RelativeLayout.LayoutParams layoutParams)) {
 				return;
 			}
+
+			int agentIconPlaceholderId = carrierLabel.getResources().getIdentifier(
+					"keyguard_agent_icon_placeholder", "id", mContext.getPackageName());
+			if (agentIconPlaceholderId == 0) {
+				return;
+			}
+
+			if (!customCarrierTextEnabled) {
+				layoutParams.removeRule(RelativeLayout.ALIGN_PARENT_START);
+				layoutParams.addRule(RelativeLayout.END_OF, agentIconPlaceholderId);
+				carrierLabel.setLayoutParams(layoutParams);
+				return;
+			}
+
+			layoutParams.removeRule(RelativeLayout.END_OF);
+			layoutParams.addRule(RelativeLayout.ALIGN_PARENT_START);
 
 			ViewGroup statusBarView = (ViewGroup) keyguardStatusBarView;
 			int symmetricMargin = Math.max(0, statusBarView.getPaddingEnd()
 					+ getIntField(keyguardStatusBarView, "mStatusBarPaddingEnd")
 					- statusBarView.getPaddingStart());
-			if (layoutParams.getMarginStart() != symmetricMargin) {
-				layoutParams.setMarginStart(symmetricMargin);
-				carrierLabel.setLayoutParams(layoutParams);
-			}
+			layoutParams.setMarginStart(symmetricMargin);
+			carrierLabel.setLayoutParams(layoutParams);
 		} catch (Throwable ignored) {}
 	}
 
