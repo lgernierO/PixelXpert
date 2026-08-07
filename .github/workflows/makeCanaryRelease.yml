@@ -40,12 +40,13 @@ jobs:
         submodules: recursive
         fetch-depth: 0
       
-    - name: JDK 21 Setup
+    - name: JDK 25 Setup
       uses: actions/setup-java@v5
       with:
-        java-version: '21'
-        distribution: 'jetbrains'
+        java-version: '25'
+        distribution: temurin
         cache: gradle
+      - run: java --version
 
     - name: Gradlew Permissions
       run: chmod +x gradlew
