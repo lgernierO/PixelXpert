@@ -74,6 +74,8 @@ public class KeyguardMods extends XposedModPack {
 	private static boolean customCarrierTextEnabled = false;
 	private static String customCarrierText = "";
 	private static Object carrierTextController;
+	private static volatile boolean carrierBatteryAnimationPending;
+	private static volatile boolean carrierBatteryAnimationActive;
 
 	final StringFormatter carrierStringFormatter = new StringFormatter();
 	final StringFormatter clockStringFormatter = new StringFormatter();
@@ -185,6 +187,8 @@ public class KeyguardMods extends XposedModPack {
 		ReflectedClass KeyguardQuickAffordanceViewBinderClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.binder.KeyguardQuickAffordanceViewBinder");
 		ReflectedClass KeyguardQuickAffordanceViewClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.view.KeyguardQuickAffordanceView");
 		ReflectedClass SceneWindowRootViewClass = ReflectedClass.ofIfPossible("com.android.systemui.scene.ui.view.SceneWindowRootView");
+		ReflectedClass SystemStatusAnimationSchedulerClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.events.SystemStatusAnimationSchedulerImpl");
+		ReflectedClass StatusBarSystemEventDefaultAnimatorClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.fragment.StatusBarSystemEventDefaultAnimator");
 
 		NotificationShadeWindowViewClass
 				.after("onAttachedToWindow")
@@ -379,15 +383,27 @@ public class KeyguardMods extends XposedModPack {
 
 		KeyguardStatusBarViewClass
 				.after("onFinishInflate")
-				.run(param -> alignCustomCarrierText(param.thisObject));
+				.run(param -> applyCarrierTextLayout(param.thisObject));
 
 		KeyguardStatusBarViewClass
 				.after("updateCarrierLabelMargin")
-				.run(param -> alignCustomCarrierText(param.thisObject));
+				.run(param -> applyCarrierTextLayout(param.thisObject));
 
 		KeyguardStatusBarViewClass
 				.after("updateWindowInsets")
-				.run(param -> alignCustomCarrierText(param.thisObject));
+				.run(param -> applyCarrierTextLayout(param.thisObject));
+
+		SystemStatusAnimationSchedulerClass
+				.after("onStatusEvent")
+				.run(param -> updatePendingBatteryAnimation(param.thisObject));
+
+		StatusBarSystemEventDefaultAnimatorClass
+				.before("onSystemEventAnimationBegin")
+				.run(param -> beginCarrierBatteryAnimation());
+
+		StatusBarSystemEventDefaultAnimatorClass
+				.after("onSystemEventAnimationFinish")
+				.run(param -> finishCarrierBatteryAnimation(param.getResult()));
 
 		CarrierTextControllerClass
 				.after("onInit")
@@ -598,7 +614,7 @@ public class KeyguardMods extends XposedModPack {
 			mView.post(() -> {
 				try {
 					callMethod(mView.getParent(), "updateCarrierLabelMargin");
-					alignCustomCarrierText(mView.getParent());
+					applyCarrierTextLayout(mView.getParent());
 				} catch (Throwable ignored) {}
 				if (customCarrierTextEnabled) {
 					mView.setText(carrierStringFormatter.formatString(customCarrierText));
@@ -607,7 +623,77 @@ public class KeyguardMods extends XposedModPack {
 		} catch (Throwable ignored) {} //probably not initiated yet
 	}
 
-	private void alignCustomCarrierText(Object keyguardStatusBarView) {
+	private void updatePendingBatteryAnimation(Object scheduler) {
+		try {
+			Object scheduledEvent = callMethod(getObjectField(scheduler, "scheduledEvent"), "getValue");
+			carrierBatteryAnimationPending = scheduledEvent != null
+					&& scheduledEvent.getClass().getName().equals("com.android.systemui.statusbar.events.BatteryEvent");
+		} catch (Throwable ignored) {
+			carrierBatteryAnimationPending = false;
+		}
+	}
+
+	private void beginCarrierBatteryAnimation() {
+		if (!carrierBatteryAnimationPending || !customCarrierTextEnabled) return;
+
+		carrierBatteryAnimationPending = false;
+		carrierBatteryAnimationActive = true;
+		applyCurrentCarrierTextLayout();
+	}
+
+	private void finishCarrierBatteryAnimation(Object animator) {
+		if (!carrierBatteryAnimationActive) return;
+
+		try {
+			ClassLoader classLoader = animator.getClass().getClassLoader();
+			Class<?> listenerClass = Class.forName(
+					"androidx.core.animation.Animator$AnimatorListener", false, classLoader);
+			Object listener = java.lang.reflect.Proxy.newProxyInstance(
+					classLoader,
+					new Class<?>[]{listenerClass},
+					(proxy, method, args) -> {
+						if (method.getName().equals("onAnimationEnd")
+								|| method.getName().equals("onAnimationCancel")) {
+							endCarrierBatteryAnimation();
+						} else if (method.getName().equals("hashCode")) {
+							return System.identityHashCode(proxy);
+						} else if (method.getName().equals("equals")) {
+							return proxy == args[0];
+						} else if (method.getName().equals("toString")) {
+							return "PixelXpertCarrierAnimationListener";
+						}
+						return null;
+					});
+			callMethod(animator, "addListener", listener);
+		} catch (Throwable ignored) {
+			postCarrierAnimationFallback();
+		}
+	}
+
+	private void postCarrierAnimationFallback() {
+		try {
+			TextView carrierLabel = getObjectField(carrierTextController, "mView");
+			carrierLabel.postDelayed(this::endCarrierBatteryAnimation, 1200);
+		} catch (Throwable ignored) {
+			endCarrierBatteryAnimation();
+		}
+	}
+
+	private void endCarrierBatteryAnimation() {
+		if (!carrierBatteryAnimationActive) return;
+
+		carrierBatteryAnimationActive = false;
+		applyCurrentCarrierTextLayout();
+	}
+
+	private void applyCurrentCarrierTextLayout() {
+		try {
+			TextView carrierLabel = getObjectField(carrierTextController, "mView");
+			applyCarrierTextLayout(carrierLabel.getParent());
+		} catch (Throwable ignored) {}
+	}
+
+	private void applyCarrierTextLayout(Object keyguardStatusBarView) {
 		try {
 			TextView carrierLabel = getObjectField(keyguardStatusBarView, "mCarrierLabel");
 			if (!(carrierLabel.getLayoutParams() instanceof RelativeLayout.LayoutParams layoutParams)) {
@@ -616,18 +702,18 @@ public class KeyguardMods extends XposedModPack {
 
 			int agentIconPlaceholderId = carrierLabel.getResources().getIdentifier(
 					"keyguard_agent_icon_placeholder", "id", mContext.getPackageName());
-			if (agentIconPlaceholderId == 0) {
-				return;
-			}
-
-			if (!customCarrierTextEnabled) {
+			if (!customCarrierTextEnabled || carrierBatteryAnimationActive) {
 				layoutParams.removeRule(RelativeLayout.ALIGN_PARENT_START);
-				layoutParams.addRule(RelativeLayout.END_OF, agentIconPlaceholderId);
+				if (agentIconPlaceholderId != 0) {
+					layoutParams.addRule(RelativeLayout.END_OF, agentIconPlaceholderId);
+				}
 				carrierLabel.setLayoutParams(layoutParams);
 				return;
 			}
 
-			layoutParams.removeRule(RelativeLayout.END_OF);
+			if (agentIconPlaceholderId != 0) {
+				layoutParams.removeRule(RelativeLayout.END_OF);
+			}
 			layoutParams.addRule(RelativeLayout.ALIGN_PARENT_START);
 
 			ViewGroup statusBarView = (ViewGroup) keyguardStatusBarView;
