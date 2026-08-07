@@ -378,7 +378,15 @@ public class KeyguardMods extends XposedModPack {
 //		clockStringFormatter.registerCallback(this::updateMiddleTexts);
 
 		KeyguardStatusBarViewClass
+				.after("onFinishInflate")
+				.run(param -> alignCustomCarrierText(param.thisObject));
+
+		KeyguardStatusBarViewClass
 				.after("updateCarrierLabelMargin")
+				.run(param -> alignCustomCarrierText(param.thisObject));
+
+		KeyguardStatusBarViewClass
+				.after("updateWindowInsets")
 				.run(param -> alignCustomCarrierText(param.thisObject));
 
 		CarrierTextControllerClass
@@ -590,6 +598,7 @@ public class KeyguardMods extends XposedModPack {
 			mView.post(() -> {
 				try {
 					callMethod(mView.getParent(), "updateCarrierLabelMargin");
+					alignCustomCarrierText(mView.getParent());
 				} catch (Throwable ignored) {}
 				if (customCarrierTextEnabled) {
 					mView.setText(carrierStringFormatter.formatString(customCarrierText));
