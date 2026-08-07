@@ -1,2 +1,3 @@
 Editing this file will trigger the build script for a new canary.
-Adaptation branch build trigger for the latest SystemUI status bar compatibility changes.
+Adaptation branch build trigger for latest SystemUI status bar compatibility changes.
+Package manager hooks synced with canary for the current services.jar.
