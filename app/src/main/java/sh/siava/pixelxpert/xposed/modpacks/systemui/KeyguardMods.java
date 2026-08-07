@@ -5,6 +5,7 @@ import static android.view.View.GONE;
 import static android.view.View.VISIBLE;
 import static de.robv.android.xposed.XposedBridge.invokeOriginalMethod;
 import static de.robv.android.xposed.XposedHelpers.getBooleanField;
+import static de.robv.android.xposed.XposedHelpers.getIntField;
 import static de.robv.android.xposed.XposedHelpers.setObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import static sh.siava.pixelxpert.xposed.modpacks.systemui.BatteryDataProvider.isCharging;
@@ -17,7 +18,6 @@ import android.annotation.SuppressLint;
 import android.app.WallpaperManager;
 import android.content.Context;
 import android.content.res.ColorStateList;
-import android.content.res.Resources;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
@@ -73,8 +73,6 @@ public class KeyguardMods extends XposedModPack {
 	private static boolean customCarrierTextEnabled = false;
 	private static String customCarrierText = "";
 	private static Object carrierTextController;
-	private WeakReference<TextView> carrierTextLayoutView = new WeakReference<>(null);
-	private RelativeLayout.LayoutParams originalCarrierTextLayoutParams;
 
 	final StringFormatter carrierStringFormatter = new StringFormatter();
 	final StringFormatter clockStringFormatter = new StringFormatter();
@@ -378,6 +376,10 @@ public class KeyguardMods extends XposedModPack {
 
 //		clockStringFormatter.registerCallback(this::updateMiddleTexts);
 
+		KeyguardStatusBarViewClass
+				.after("updateCarrierLabelMargin")
+				.run(param -> alignCustomCarrierText(param.thisObject));
+
 		CarrierTextControllerClass
 				.after("onInit")
 				.run(param -> {
@@ -585,7 +587,9 @@ public class KeyguardMods extends XposedModPack {
 		try {
 			TextView mView = getObjectField(carrierTextController, "mView");
 			mView.post(() -> {
-				updateCarrierTextLayout(mView);
+				try {
+					callMethod(mView.getParent(), "updateCarrierLabelMargin");
+				} catch (Throwable ignored) {}
 				if (customCarrierTextEnabled) {
 					mView.setText(carrierStringFormatter.formatString(customCarrierText));
 				}
@@ -593,36 +597,24 @@ public class KeyguardMods extends XposedModPack {
 		} catch (Throwable ignored) {} //probably not initiated yet
 	}
 
-	private void updateCarrierTextLayout(TextView carrierTextView) {
-		if (!(carrierTextView.getLayoutParams() instanceof RelativeLayout.LayoutParams currentLayoutParams)) {
-			return;
-		}
+	private void alignCustomCarrierText(Object keyguardStatusBarView) {
+		if (!customCarrierTextEnabled) return;
 
-		TextView previousView = carrierTextLayoutView.get();
-		if (previousView != carrierTextView || originalCarrierTextLayoutParams == null) {
-			carrierTextLayoutView = new WeakReference<>(carrierTextView);
-			originalCarrierTextLayoutParams = new RelativeLayout.LayoutParams(currentLayoutParams);
-		}
-
-		RelativeLayout.LayoutParams layoutParams =
-				new RelativeLayout.LayoutParams(originalCarrierTextLayoutParams);
-		if (customCarrierTextEnabled) {
-			Resources resources = carrierTextView.getResources();
-			int agentIconPlaceholderId = resources.getIdentifier(
-					"keyguard_agent_icon_placeholder", "id", mContext.getPackageName());
-			if (agentIconPlaceholderId != 0
-					&& layoutParams.getRule(RelativeLayout.END_OF) == agentIconPlaceholderId) {
-				// Android 17 places carrier text after an agent-icon slot; restore the old text inset.
-				layoutParams.removeRule(RelativeLayout.END_OF);
-				layoutParams.addRule(RelativeLayout.ALIGN_PARENT_START);
-				int marginId = resources.getIdentifier(
-						"keyguard_carrier_text_margin", "dimen", mContext.getPackageName());
-				if (marginId != 0) {
-					layoutParams.setMarginStart(resources.getDimensionPixelSize(marginId));
-				}
+		try {
+			TextView carrierLabel = getObjectField(keyguardStatusBarView, "mCarrierLabel");
+			if (!(carrierLabel.getLayoutParams() instanceof ViewGroup.MarginLayoutParams layoutParams)) {
+				return;
 			}
-		}
-		carrierTextView.setLayoutParams(layoutParams);
+
+			ViewGroup statusBarView = (ViewGroup) keyguardStatusBarView;
+			int symmetricMargin = Math.max(0, statusBarView.getPaddingEnd()
+					+ getIntField(keyguardStatusBarView, "mStatusBarPaddingEnd")
+					- statusBarView.getPaddingStart());
+			if (layoutParams.getMarginStart() != symmetricMargin) {
+				layoutParams.setMarginStart(symmetricMargin);
+				carrierLabel.setLayoutParams(layoutParams);
+			}
+		} catch (Throwable ignored) {}
 	}
 
 	private void updateMiddleTexts()
