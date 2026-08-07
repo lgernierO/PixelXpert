@@ -74,8 +74,6 @@ public class KeyguardMods extends XposedModPack {
 	private static boolean customCarrierTextEnabled = false;
 	private static String customCarrierText = "";
 	private static Object carrierTextController;
-	private static volatile boolean carrierBatteryAnimationPending;
-	private static volatile boolean carrierBatteryAnimationActive;
 
 	final StringFormatter carrierStringFormatter = new StringFormatter();
 	final StringFormatter clockStringFormatter = new StringFormatter();
@@ -187,8 +185,6 @@ public class KeyguardMods extends XposedModPack {
 		ReflectedClass KeyguardQuickAffordanceViewBinderClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.binder.KeyguardQuickAffordanceViewBinder");
 		ReflectedClass KeyguardQuickAffordanceViewClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.view.KeyguardQuickAffordanceView");
 		ReflectedClass SceneWindowRootViewClass = ReflectedClass.ofIfPossible("com.android.systemui.scene.ui.view.SceneWindowRootView");
-		ReflectedClass SystemStatusAnimationSchedulerClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.events.SystemStatusAnimationSchedulerImpl");
-		ReflectedClass StatusBarSystemEventDefaultAnimatorClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.fragment.StatusBarSystemEventDefaultAnimator");
 
 		NotificationShadeWindowViewClass
 				.after("onAttachedToWindow")
@@ -393,17 +389,7 @@ public class KeyguardMods extends XposedModPack {
 				.after("updateWindowInsets")
 				.run(param -> applyCarrierTextLayout(param.thisObject));
 
-		SystemStatusAnimationSchedulerClass
-				.after("onStatusEvent")
-				.run(param -> updatePendingBatteryAnimation(param.thisObject));
 
-		StatusBarSystemEventDefaultAnimatorClass
-				.before("onSystemEventAnimationBegin")
-				.run(param -> beginCarrierBatteryAnimation());
-
-		StatusBarSystemEventDefaultAnimatorClass
-				.after("onSystemEventAnimationFinish")
-				.run(param -> finishCarrierBatteryAnimation(param.getResult()));
 
 		CarrierTextControllerClass
 				.after("onInit")
@@ -623,80 +609,6 @@ public class KeyguardMods extends XposedModPack {
 		} catch (Throwable ignored) {} //probably not initiated yet
 	}
 
-	private void updatePendingBatteryAnimation(Object scheduler) {
-		try {
-			Object scheduledEvent = callMethod(getObjectField(scheduler, "scheduledEvent"), "getValue");
-			carrierBatteryAnimationPending = scheduledEvent != null
-					&& scheduledEvent.getClass().getName().equals("com.android.systemui.statusbar.events.BatteryEvent");
-		} catch (Throwable ignored) {
-			carrierBatteryAnimationPending = false;
-		}
-	}
-
-	private void beginCarrierBatteryAnimation() {
-		if (!carrierBatteryAnimationPending || !customCarrierTextEnabled) return;
-
-		carrierBatteryAnimationPending = false;
-		carrierBatteryAnimationActive = true;
-		try {
-			TextView carrierLabel = getObjectField(carrierTextController, "mView");
-			callMethod(carrierLabel.getParent(), "updateCarrierLabelMargin");
-		} catch (Throwable ignored) {}
-		applyCurrentCarrierTextLayout();
-	}
-
-	private void finishCarrierBatteryAnimation(Object animator) {
-		if (!carrierBatteryAnimationActive) return;
-
-		try {
-			ClassLoader classLoader = animator.getClass().getClassLoader();
-			Class<?> listenerClass = Class.forName(
-					"androidx.core.animation.Animator$AnimatorListener", false, classLoader);
-			Object listener = java.lang.reflect.Proxy.newProxyInstance(
-					classLoader,
-					new Class<?>[]{listenerClass},
-					(proxy, method, args) -> {
-						if (method.getName().equals("onAnimationEnd")
-								|| method.getName().equals("onAnimationCancel")) {
-							endCarrierBatteryAnimation();
-						} else if (method.getName().equals("hashCode")) {
-							return System.identityHashCode(proxy);
-						} else if (method.getName().equals("equals")) {
-							return proxy == args[0];
-						} else if (method.getName().equals("toString")) {
-							return "PixelXpertCarrierAnimationListener";
-						}
-						return null;
-					});
-			callMethod(animator, "addListener", listener);
-		} catch (Throwable ignored) {
-			postCarrierAnimationFallback();
-		}
-	}
-
-	private void postCarrierAnimationFallback() {
-		try {
-			TextView carrierLabel = getObjectField(carrierTextController, "mView");
-			carrierLabel.postDelayed(this::endCarrierBatteryAnimation, 1200);
-		} catch (Throwable ignored) {
-			endCarrierBatteryAnimation();
-		}
-	}
-
-	private void endCarrierBatteryAnimation() {
-		if (!carrierBatteryAnimationActive) return;
-
-		carrierBatteryAnimationActive = false;
-		applyCurrentCarrierTextLayout();
-	}
-
-	private void applyCurrentCarrierTextLayout() {
-		try {
-			TextView carrierLabel = getObjectField(carrierTextController, "mView");
-			applyCarrierTextLayout(carrierLabel.getParent());
-		} catch (Throwable ignored) {}
-	}
-
 	private void applyCarrierTextLayout(Object keyguardStatusBarView) {
 		try {
 			TextView carrierLabel = getObjectField(keyguardStatusBarView, "mCarrierLabel");
@@ -706,7 +618,7 @@ public class KeyguardMods extends XposedModPack {
 
 			int agentIconPlaceholderId = carrierLabel.getResources().getIdentifier(
 					"keyguard_agent_icon_placeholder", "id", mContext.getPackageName());
-			if (!customCarrierTextEnabled || carrierBatteryAnimationActive) {
+			if (!customCarrierTextEnabled) {
 				layoutParams.removeRule(RelativeLayout.ALIGN_PARENT_START);
 				if (agentIconPlaceholderId != 0) {
 					layoutParams.addRule(RelativeLayout.END_OF, agentIconPlaceholderId);
