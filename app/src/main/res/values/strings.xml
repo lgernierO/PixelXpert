@@ -656,6 +656,17 @@
     <string name="documentsui_remember_sort_summary">Keep a global sort order and optional per-folder overrides in the system file picker</string>
     <string name="documentsui_remember_sort_usage">In the file picker sort menu, tap normally to update the global sort. Long-press a sort option to save it only for the current folder. A normal selection also clears that folder override.</string>
 
+    <!-- Package manager advanced options -->
+    <string name="pm_advanced_category">Advanced installation checks</string>
+    <string name="pm_exact_signature_title">Bypass exact split signature matching</string>
+    <string name="pm_exact_signature_summary">High risk: allows base and split APK signing details to differ during installation</string>
+    <string name="pm_shared_uid_title">Bypass shared UID signature checks</string>
+    <string name="pm_shared_uid_summary">High risk: allows differently signed user apps to update while using a shared UID; platform shared UID restrictions remain</string>
+    <string name="app_info_enhancements_category">App info</string>
+    <string name="app_info_show_version_code_title">Show version code</string>
+    <string name="app_info_allow_disable_user_apps_title">Allow disabling user apps</string>
+    <string name="app_info_allow_disable_user_apps_summary">Adds an enable/disable action to app info for non-system apps</string>
+
     <!-- Package installer redirection -->
     <string name="pm_installer_redirect_category">Installer redirection</string>
     <string name="pm_installer_redirect_title">Redirect package installer</string>
