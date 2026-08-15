@@ -546,4 +546,149 @@
     <string name="restart_now">立即重启</string>
     <string name="watts">瓦</string>
     <string name="fast_charging_threshold_title">快充阈值</string>
+
+
+    <!-- Gboard、文件选择器、物理按键与包管理器 -->
+    <string name="app_info_allow_disable_user_apps_summary">在非系统应用的应用信息页中添加启用/停用操作</string>
+
+    <string name="app_info_allow_disable_user_apps_title">允许停用用户应用</string>
+
+    <string name="app_info_enhancements_category">应用信息</string>
+
+    <string name="app_info_show_version_code_title">显示版本代码</string>
+
+    <string name="documentsui_header">文件与文档选择器</string>
+
+    <string name="documentsui_header_summary">文件浏览和排序行为</string>
+
+    <string name="documentsui_remember_sort_summary">在系统文件选择器中保留全局排序，并支持单独保存每个文件夹的排序</string>
+
+    <string name="documentsui_remember_sort_title">记住排序方式</string>
+
+    <string name="documentsui_remember_sort_usage">在文件选择器的排序菜单中，普通点击会更新全局排序；长按某个排序选项会仅为当前文件夹保存。普通点击也会清除当前文件夹的单独设置。</string>
+
+
+    <string name="gboard_access_point_summary">启用快捷功能菜单、Silk 主题、系统字体、Google Sans、自定义主题和动画实验功能</string>
+
+    <string name="gboard_access_point_title">快捷功能菜单重设计</string>
+
+    <string name="gboard_ai_summary">启用已知的智能回复、智能撰写、Emojify、贴纸和 AI Core 实验功能</string>
+
+    <string name="gboard_ai_title">AI 与智能输入</string>
+
+    <string name="gboard_amoled_black_summary">将 Material Expressive 表面容器改为纯黑，同时保留强调色</string>
+
+    <string name="gboard_amoled_black_title">深色模式使用 AMOLED 纯黑</string>
+
+    <string name="gboard_clipboard_category">剪贴板</string>
+
+    <string name="gboard_clipboard_chips_summary">启用操作建议、实体提取和复制后回复实验功能</string>
+
+    <string name="gboard_clipboard_chips_title">剪贴板操作建议</string>
+
+    <string name="gboard_clipboard_days_summary">允许范围：0 到 3650；0 表示请求全部仍保留的条目</string>
+
+    <string name="gboard_clipboard_days_title">可见历史天数</string>
+
+    <string name="gboard_clipboard_history_summary">修改 Gboard 请求的条目数量和时间范围；已被 Gboard 删除的旧条目无法恢复</string>
+
+    <string name="gboard_clipboard_history_title">自定义剪贴板历史</string>
+
+    <string name="gboard_clipboard_size_summary">允许范围：5 到 100</string>
+
+    <string name="gboard_clipboard_size_title">最大可见条目数</string>
+
+    <string name="gboard_emoji_kitchen_summary">启用浏览、搜索、推荐、动画和内嵌选择器实验功能</string>
+
+    <string name="gboard_emoji_kitchen_title">Emoji Kitchen 增强</string>
+
+    <string name="gboard_experimental_category">实验性引擎</string>
+
+    <string name="gboard_experimental_summary">依赖 Gboard 私有开关，更新后可能变化或失效；修改后请重启 Gboard</string>
+
+    <string name="gboard_fast_access_title">快速访问栏</string>
+
+
+    <string name="gboard_floating_summary">启用横屏、多窗口、自由窗口、平板分屏、大小滑块和过渡动画实验功能</string>
+
+    <string name="gboard_floating_title">浮动与分屏键盘</string>
+
+    <string name="gboard_force_incognito_summary">对所有输入框请求不进行个性化学习；这不等同于完整的 Gboard 无痕模式界面</string>
+
+    <string name="gboard_force_incognito_title">禁用个性化学习</string>
+
+    <string name="gboard_grammar_summary">启用已知的端侧校对、语法检查、写作工具和文本转换实验功能</string>
+
+    <string name="gboard_grammar_title">语法与校对</string>
+
+    <string name="gboard_header">Gboard</string>
+
+    <string name="gboard_header_summary">主题、剪贴板、隐私与实验性输入功能</string>
+
+    <string name="gboard_inline_suggestions_title">行内多词建议</string>
+
+    <string name="gboard_input_category">输入增强</string>
+
+    <string name="gboard_metered_downloads_summary">允许已知的语言、语言识别和语音包通过移动数据等计费网络下载</string>
+
+    <string name="gboard_metered_downloads_title">允许通过计费网络下载</string>
+
+    <string name="gboard_multilingual_summary">启用已知的多语言输入、候选词、Pixel 和语音增强实验功能</string>
+
+    <string name="gboard_multilingual_title">多语言输入</string>
+
+    <string name="gboard_privacy_category">隐私</string>
+
+    <string name="gboard_privacy_flags_summary">覆盖已知的纠错存储、内容捕获、日志、指标和训练缓存开关</string>
+
+    <string name="gboard_privacy_flags_title">减少遥测和训练</string>
+
+    <string name="gboard_proactive_emoji_title">主动 Emoji 建议</string>
+
+    <string name="gboard_secure_clipboard_summary">阻止密码框内容及疑似验证码、PIN 或长账号数字写入 Gboard 历史</string>
+
+    <string name="gboard_secure_clipboard_title">敏感文本不写入 Gboard 历史</string>
+
+    <string name="gboard_tflite_title">TFLite 预测引擎</string>
+
+    <string name="gboard_theme_category">主题</string>
+
+    <string name="pm_advanced_category">高级安装检查</string>
+
+    <string name="pm_exact_signature_summary">高风险：允许安装时基础 APK 与分包 APK 的签名信息不同</string>
+
+    <string name="pm_exact_signature_title">绕过分包精确签名匹配</string>
+
+    <string name="pm_fix_session_permissions_summary">适用于外部安装器的 Android 14+ 实验性兼容修复</string>
+
+    <string name="pm_fix_session_permissions_title">修复会话 APK 路径访问</string>
+
+    <string name="pm_force_explicit_installer_summary">同时重定向硬编码到特定安装器组件的请求</string>
+
+    <string name="pm_force_explicit_installer_title">覆盖明确指定的安装器</string>
+
+    <string name="pm_installer_redirect_category">安装器重定向</string>
+
+    <string name="pm_installer_redirect_summary">将 APK 安装请求和可选的卸载请求交给指定程序处理</string>
+
+    <string name="pm_installer_redirect_title">重定向应用安装器</string>
+
+    <string name="pm_installer_target_title">安装器</string>
+
+    <string name="pm_intercept_session_summary">拦截 CONFIRM_INSTALL 和 CONFIRM_PERMISSIONS 请求</string>
+
+    <string name="pm_intercept_session_title">重定向会话安装确认</string>
+
+    <string name="pm_intercept_uninstall_summary">将 ACTION_DELETE 和 ACTION_UNINSTALL_PACKAGE 交给指定程序处理</string>
+
+    <string name="pm_intercept_uninstall_title">重定向卸载请求</string>
+
+    <string name="pm_shared_uid_summary">高风险：允许签名不同的用户应用在使用共享 UID 时更新；平台共享 UID 限制仍然保留</string>
+
+    <string name="pm_shared_uid_title">绕过共享 UID 签名检查</string>
+
+    <string name="pm_uninstall_follow_installer_title">卸载请求使用同一安装器</string>
+
+    <string name="pm_uninstaller_target_title">卸载器</string>
+
 </resources>

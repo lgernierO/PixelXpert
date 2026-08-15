@@ -543,4 +543,147 @@
     <string name="restart_now">立即重啟</string>
     <string name="watts">瓦特</string>
     <string name="fast_charging_threshold_title">快充閾值</string>
+
+
+    <!-- Gboard、文件选择器、物理按键与包管理器 -->
+    <string name="app_info_allow_disable_user_apps_summary">在非系統應用程式的應用程式資訊中新增啟用/停用操作</string>
+
+    <string name="app_info_allow_disable_user_apps_title">允許停用使用者應用程式</string>
+
+    <string name="app_info_enhancements_category">應用程式資訊</string>
+
+    <string name="app_info_show_version_code_title">顯示版本碼</string>
+
+    <string name="documentsui_header">檔案與文件挑選器</string>
+
+    <string name="documentsui_header_summary">檔案瀏覽與排序行為</string>
+
+    <string name="documentsui_remember_sort_summary">在系統檔案挑選器中保留全域排序方式，並可針對個別資料夾覆寫</string>
+
+    <string name="documentsui_remember_sort_title">記住排序方式</string>
+
+    <string name="documentsui_remember_sort_usage">在檔案挑選器的排序選單中，直接輕觸可更新全域排序。長按排序選項可僅為目前資料夾儲存設定。直接選取也會清除該資料夾的覆寫設定。</string>
+
+    <string name="gboard_access_point_summary">啟用快捷選單、Silk 主題、系統字型、Google Sans、自訂主題與動畫實驗功能</string>
+
+    <string name="gboard_access_point_title">重新設計快捷選單</string>
+
+    <string name="gboard_ai_summary">啟用已知的智慧回覆、智慧撰寫、Emojify、貼圖與 AI Core 實驗功能</string>
+
+    <string name="gboard_ai_title">AI 與智慧輸入</string>
+
+    <string name="gboard_amoled_black_summary">將 Material Expressive 表面容器設為純黑，同時保留強調色</string>
+
+    <string name="gboard_amoled_black_title">深色模式使用 AMOLED 純黑</string>
+
+    <string name="gboard_clipboard_category">剪貼簿</string>
+
+    <string name="gboard_clipboard_chips_summary">啟用 Gboard 動作方塊、實體擷取與複製後回覆實驗功能</string>
+
+    <string name="gboard_clipboard_chips_title">剪貼簿動作方塊</string>
+
+    <string name="gboard_clipboard_days_summary">允許範圍：0 至 3650；設為 0 會要求所有仍保留的項目</string>
+
+    <string name="gboard_clipboard_days_title">可顯示的記錄天數</string>
+
+    <string name="gboard_clipboard_history_summary">變更 Gboard 要求的項目數量與保留時間；Gboard 已刪除的舊項目無法復原</string>
+
+    <string name="gboard_clipboard_history_title">自訂剪貼簿記錄</string>
+
+    <string name="gboard_clipboard_size_summary">允許範圍：5 至 100</string>
+
+    <string name="gboard_clipboard_size_title">可顯示項目數上限</string>
+
+    <string name="gboard_emoji_kitchen_summary">啟用瀏覽、搜尋、推薦、動畫與內嵌挑選器實驗功能</string>
+
+    <string name="gboard_emoji_kitchen_title">Emoji Kitchen 增強功能</string>
+
+    <string name="gboard_experimental_category">實驗性引擎</string>
+
+    <string name="gboard_experimental_summary">使用 Gboard 私有旗標，更新後可能變更或停止運作；修改後請重新啟動 Gboard</string>
+
+    <string name="gboard_fast_access_title">快速存取列</string>
+
+    <string name="gboard_floating_summary">啟用橫向、多視窗、自由形式、平板分割鍵盤、大小滑桿與轉場實驗功能</string>
+
+    <string name="gboard_floating_title">浮動與分割鍵盤</string>
+
+    <string name="gboard_force_incognito_summary">要求所有輸入欄位都不進行個人化學習；這不會強制顯示完整的 Gboard 無痕模式介面</string>
+
+    <string name="gboard_force_incognito_title">停用個人化學習</string>
+
+    <string name="gboard_grammar_summary">啟用已知的裝置端校對、文法檢查、寫作工具與文字轉換實驗功能</string>
+
+    <string name="gboard_grammar_title">文法與校對</string>
+
+    <string name="gboard_header">Gboard</string>
+
+    <string name="gboard_header_summary">主題、剪貼簿、隱私權與實驗性輸入功能</string>
+
+    <string name="gboard_inline_suggestions_title">行內多字詞建議</string>
+
+    <string name="gboard_input_category">輸入增強功能</string>
+
+    <string name="gboard_metered_downloads_summary">允許透過行動數據用量或其他計量付費網路下載語言、語言辨識與語音套件</string>
+
+    <string name="gboard_metered_downloads_title">允許透過計量付費網路下載</string>
+
+    <string name="gboard_multilingual_summary">啟用已知的多語言輸入、候選字、Pixel 與語音增強實驗功能</string>
+
+    <string name="gboard_multilingual_title">多語言輸入</string>
+
+    <string name="gboard_privacy_category">隱私權</string>
+
+    <string name="gboard_privacy_flags_summary">覆寫已知的 Gboard 旗標，涵蓋修正內容儲存、內容擷取、記錄、指標與訓練快取</string>
+
+    <string name="gboard_privacy_flags_title">減少遙測與訓練</string>
+
+    <string name="gboard_proactive_emoji_title">主動提供表情符號建議</string>
+
+    <string name="gboard_secure_clipboard_summary">阻擋從密碼欄位複製的內容，以及疑似驗證碼、PIN 或較長帳號號碼的項目</string>
+
+    <string name="gboard_secure_clipboard_title">不將敏感文字存入 Gboard 記錄</string>
+
+    <string name="gboard_tflite_title">TFLite 預測引擎</string>
+
+    <string name="gboard_theme_category">主題</string>
+
+    <string name="pm_advanced_category">進階安裝檢查</string>
+
+    <string name="pm_exact_signature_summary">高風險：允許安裝時基礎 APK 與分割 APK 的簽章資訊不同</string>
+
+    <string name="pm_exact_signature_title">略過分割 APK 的精確簽章比對</string>
+
+    <string name="pm_fix_session_permissions_summary">供外部安裝程式使用的 Android 14 以上版本實驗性相容修正</string>
+
+    <string name="pm_fix_session_permissions_title">修正工作階段 APK 路徑存取權</string>
+
+    <string name="pm_force_explicit_installer_summary">同時重新導向硬編碼至特定安裝程式元件的要求</string>
+
+    <string name="pm_force_explicit_installer_title">覆寫明確指定的安裝程式</string>
+
+    <string name="pm_installer_redirect_category">安裝程式重新導向</string>
+
+    <string name="pm_installer_redirect_summary">將 APK 安裝要求及選用的解除安裝要求傳送給所選處理程式</string>
+
+    <string name="pm_installer_redirect_title">重新導向套件安裝程式</string>
+
+    <string name="pm_installer_target_title">安裝程式</string>
+
+    <string name="pm_intercept_session_summary">攔截 CONFIRM_INSTALL 與 CONFIRM_PERMISSIONS 要求</string>
+
+    <string name="pm_intercept_session_title">重新導向工作階段安裝確認</string>
+
+    <string name="pm_intercept_uninstall_summary">將 ACTION_DELETE 與 ACTION_UNINSTALL_PACKAGE 傳送給所選處理程式</string>
+
+    <string name="pm_intercept_uninstall_title">重新導向解除安裝要求</string>
+
+    <string name="pm_shared_uid_summary">高風險：允許簽章不同的使用者應用程式在共用 UID 時更新；平台的共用 UID 限制仍然有效</string>
+
+    <string name="pm_shared_uid_title">略過共用 UID 簽章檢查</string>
+
+    <string name="pm_uninstall_follow_installer_title">解除安裝要求使用同一安裝程式</string>
+
+    <string name="pm_uninstaller_target_title">解除安裝程式</string>
+
 </resources>
