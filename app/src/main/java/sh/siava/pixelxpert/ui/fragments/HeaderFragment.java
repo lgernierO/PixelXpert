@@ -83,6 +83,8 @@ public class HeaderFragment extends ControlledPreferenceFragmentCompat {
 	private void initSearchableItems() {
 		searchItems = new SearchPreferenceItem[]{
 				new SearchPreferenceItem(R.xml.dialer_prefs, R.string.dialer_header, R.id.action_searchPreferenceFragment_to_dialerFragment),
+				new SearchPreferenceItem(R.xml.gboard_prefs, R.string.gboard_header, R.id.action_searchPreferenceFragment_to_gboardFragment),
+				new SearchPreferenceItem(R.xml.documentsui_prefs, R.string.documentsui_header, R.id.action_searchPreferenceFragment_to_documentsUIFragment),
 				new SearchPreferenceItem(R.xml.gesture_nav_prefs, R.string.gesturenav_header, R.id.action_searchPreferenceFragment_to_gestureNavFragment),
 				new SearchPreferenceItem(R.xml.hotspot_prefs, R.string.hotspot_header, R.id.action_searchPreferenceFragment_to_hotSpotFragment),
 				new SearchPreferenceItem(R.xml.lock_screen_prefs, R.string.lockscreen_header_title, R.id.action_searchPreferenceFragment_to_lockScreenFragment),

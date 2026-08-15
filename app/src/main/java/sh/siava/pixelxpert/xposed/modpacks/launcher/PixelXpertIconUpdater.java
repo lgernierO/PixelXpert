@@ -3,7 +3,7 @@ package sh.siava.pixelxpert.xposed.modpacks.launcher;
 import android.content.Context;
 import android.os.UserHandle;
 
-import de.robv.android.xposed.XposedHelpers;
+import sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat;
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.BuildConfig;
 import sh.siava.pixelxpert.xposed.XposedModPack;
@@ -33,19 +33,19 @@ public class PixelXpertIconUpdater extends XposedModPack {
 				.run(param -> {
 					if (LauncherModel == null) return;
 					try {
-						XposedHelpers.callMethod(LauncherModel, "onAppIconChanged", BuildConfig.APPLICATION_ID, UserHandle.getUserHandleForUid(0));
+						XposedCompat.callMethod(LauncherModel, "onAppIconChanged", BuildConfig.APPLICATION_ID, UserHandle.getUserHandleForUid(0));
 					} catch (Throwable ignored) {
 						try {
 							// Android 17 moved this callback into a public model update task.
 							Object updateTask = PackageUpdatedTaskClass.getClazz()
 									.getConstructor(String[].class, UserHandle.class, boolean.class)
 									.newInstance(new String[]{BuildConfig.APPLICATION_ID}, UserHandle.getUserHandleForUid(0), true);
-							XposedHelpers.callMethod(LauncherModel, "enqueueModelUpdateTask", updateTask);
+							XposedCompat.callMethod(LauncherModel, "enqueueModelUpdateTask", updateTask);
 						} catch (Throwable modern) {
 							try {
-								XposedHelpers.callMethod(LauncherModel, "forceReload", "PixelXpert icon changed");
+								XposedCompat.callMethod(LauncherModel, "forceReload", "PixelXpert icon changed");
 							} catch (Throwable legacy) {
-								try { XposedHelpers.callMethod(LauncherModel, "forceReload"); } catch (Throwable ignoredAgain) {}
+								try { XposedCompat.callMethod(LauncherModel, "forceReload"); } catch (Throwable ignoredAgain) {}
 							}
 						}
 					}

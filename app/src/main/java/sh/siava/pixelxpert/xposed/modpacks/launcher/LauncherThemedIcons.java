@@ -1,11 +1,11 @@
 package sh.siava.pixelxpert.xposed.modpacks.launcher;
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.findFieldIfExists;
-import static de.robv.android.xposed.XposedHelpers.getAdditionalInstanceField;
-import static de.robv.android.xposed.XposedHelpers.getIntField;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
-import static de.robv.android.xposed.XposedHelpers.setAdditionalInstanceField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.findFieldIfExists;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getAdditionalInstanceField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getIntField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setAdditionalInstanceField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 

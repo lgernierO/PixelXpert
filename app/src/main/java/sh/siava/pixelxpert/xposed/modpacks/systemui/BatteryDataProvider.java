@@ -1,9 +1,9 @@
 package sh.siava.pixelxpert.xposed.modpacks.systemui;
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getBooleanField;
-import static de.robv.android.xposed.XposedHelpers.getIntField;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getBooleanField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getIntField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 
 import android.annotation.SuppressLint;
 import android.content.Context;

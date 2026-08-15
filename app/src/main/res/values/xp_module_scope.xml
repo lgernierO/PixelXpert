@@ -6,6 +6,8 @@
         <item>android</item>  <!-- System Framework -->
         <item>com.android.settings</item> <!-- settings app -->
         <item>com.google.android.dialer</item> <!-- google dialer -->
+        <item>com.google.android.inputmethod.latin</item> <!-- Gboard -->
+        <item>com.google.android.documentsui</item> <!-- system file picker -->
         <item>me.weishu.kernelsu</item> <!-- KSU Manager -->
         <item>com.rifsxd.ksunext</item> <!-- KSU Next Manager -->
     </string-array>

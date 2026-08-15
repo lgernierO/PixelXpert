@@ -82,6 +82,24 @@
 
 		<sh.siava.pixelxpert.ui.preferences.MaterialPreferenceMain
 			android:layout="@layout/custom_preference"
+			app:fragment="sh.siava.pixelxpert.ui.fragments.GboardFragment"
+			app:icon="@drawable/ic_keyboard"
+			app:key="gboard_header"
+			app:summary="@string/gboard_header_summary"
+			app:title="@string/gboard_header"
+			search:ignore="true" />
+
+		<sh.siava.pixelxpert.ui.preferences.MaterialPreferenceMain
+			android:layout="@layout/custom_preference"
+			app:fragment="sh.siava.pixelxpert.ui.fragments.DocumentsUIFragment"
+			app:icon="@drawable/ic_settings_files"
+			app:key="documentsui_header"
+			app:summary="@string/documentsui_header_summary"
+			app:title="@string/documentsui_header"
+			search:ignore="true" />
+
+		<sh.siava.pixelxpert.ui.preferences.MaterialPreferenceMain
+			android:layout="@layout/custom_preference"
 			app:fragment="sh.siava.pixelxpert.ui.fragments.HotSpotFragment"
 			app:icon="@drawable/ic_settings_wifi_hotspot"
 			app:key="hotspot_header"

@@ -3,9 +3,9 @@ package sh.siava.pixelxpert.xposed.modpacks.android;
 import static android.content.Context.RECEIVER_EXPORTED;
 
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getIntField;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getIntField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import static sh.siava.pixelxpert.xposed.utils.SystemUtils.PackageManager;
 

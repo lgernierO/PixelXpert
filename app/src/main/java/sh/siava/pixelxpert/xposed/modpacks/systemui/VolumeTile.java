@@ -3,9 +3,9 @@
 package sh.siava.pixelxpert.xposed.modpacks.systemui;
 
 import static android.media.AudioManager.STREAM_MUSIC;
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
-import static de.robv.android.xposed.XposedHelpers.setObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setObjectField;
 import static sh.siava.pixelxpert.xposed.utils.SystemUtils.AudioManager;
 import static sh.siava.pixelxpert.xposed.utils.SystemUtils.registerVolumeChangeListener;
 

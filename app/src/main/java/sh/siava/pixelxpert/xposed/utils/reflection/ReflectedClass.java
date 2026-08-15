@@ -1,7 +1,7 @@
 package sh.siava.pixelxpert.xposed.utils.reflection;
 
-import static de.robv.android.xposed.XposedHelpers.findClass;
-import static de.robv.android.xposed.XposedHelpers.findClassIfExists;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.findClass;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.findClassIfExists;
 import static sh.siava.pixelxpert.xposed.utils.reflection.HookHelper.hookAllMethods;
 import static sh.siava.pixelxpert.xposed.utils.reflection.HookHelper.hookMethod;
 import static sh.siava.pixelxpert.xposed.utils.toolkit.Logger.log;
@@ -18,7 +18,6 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import de.robv.android.xposed.XposedHelpers;
 import io.github.libxposed.api.XposedInterface;
 
 /** @noinspection unused*/
@@ -66,6 +65,14 @@ public class ReflectedClass
 	public static void setDefaultXposedInterface(XposedInterface xposedInterface)
 	{
 		defaultXposedInterface = xposedInterface;
+	}
+
+	static XposedInterface getDefaultXposedInterface() {
+		return defaultXposedInterface;
+	}
+
+	public static boolean deoptimize(Executable executable) {
+		return defaultXposedInterface != null && defaultXposedInterface.deoptimize(executable);
 	}
 
 
@@ -169,7 +176,7 @@ public class ReflectedClass
 
 	public Object callStaticMethod(String methodName, Object... args)
 	{
-		return XposedHelpers.callStaticMethod(clazz, methodName, args);
+		return XposedCompat.callStaticMethod(clazz, methodName, args);
 	}
 
 	public Set<Method> findMethods(Pattern namePattern)

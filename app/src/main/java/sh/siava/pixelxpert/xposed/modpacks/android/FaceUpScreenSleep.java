@@ -1,10 +1,10 @@
 package sh.siava.pixelxpert.xposed.modpacks.android;
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getBooleanField;
-import static de.robv.android.xposed.XposedHelpers.getIntField;
-import static de.robv.android.xposed.XposedHelpers.getLongField;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getBooleanField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getIntField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getLongField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 import android.content.Context;

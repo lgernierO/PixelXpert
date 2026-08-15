@@ -5,7 +5,7 @@ import static android.net.ConnectivityManager.TYPE_WIFI;
 import static android.net.wifi.WifiManager.UNKNOWN_SSID;
 import static java.util.Calendar.DAY_OF_MONTH;
 import static java.util.Calendar.DAY_OF_WEEK;
-import static de.robv.android.xposed.XposedBridge.log;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.log;
 import static sh.siava.pixelxpert.xposed.modpacks.systemui.ThermalProvider.BATTERY;
 import static sh.siava.pixelxpert.xposed.modpacks.systemui.ThermalProvider.CPU;
 import static sh.siava.pixelxpert.xposed.modpacks.systemui.ThermalProvider.GPU;

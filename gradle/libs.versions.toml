@@ -39,8 +39,9 @@ workRuntime = "2.11.2"
 kotlin = "2.4.10"
 ksp = "2.3.10"
 hilt = "2.60.1"
-lsposed-api = "101.0.1"
-lsposed-service = "101.0.0"
+lsposed-api = "102.0.0"
+lsposed-service = "102.0.0"
+dexkit = "2.2.0"
 
 [libraries]
 androidx-activity = { module = "androidx.activity:activity", version.ref = "activity" }
@@ -86,6 +87,7 @@ pytorch_android_torchvision_lite = { module = "org.pytorch:pytorch_android_torch
 remotepreferences = { module = "com.crossbowffs.remotepreferences:remotepreferences", version.ref = "remotepreferences" }
 lsposed-api = { module = "io.github.libxposed:api", version.ref = "lsposed-api" }
 lsposed-service = { module = "io.github.libxposed:service", version.ref = "lsposed-service" }
+dexkit = { module = "org.luckypray:dexkit", version.ref = "dexkit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

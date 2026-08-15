@@ -54,6 +54,21 @@
 			app:exitAnim="@anim/nav_default_exit_anim"
 			app:popEnterAnim="@anim/nav_default_pop_enter_anim"
 			app:popExitAnim="@anim/nav_default_pop_exit_anim"
+			android:id="@+id/action_headerFragment_to_gboardFragment"
+			app:destination="@id/gboardFragment" />
+		<action
+			app:enterAnim="@anim/nav_default_enter_anim"
+			app:exitAnim="@anim/nav_default_exit_anim"
+			app:popEnterAnim="@anim/nav_default_pop_enter_anim"
+			app:popExitAnim="@anim/nav_default_pop_exit_anim"
+			android:id="@+id/action_headerFragment_to_documentsUIFragment"
+			app:destination="@id/documentsUIFragment" />
+
+		<action
+			app:enterAnim="@anim/nav_default_enter_anim"
+			app:exitAnim="@anim/nav_default_exit_anim"
+			app:popEnterAnim="@anim/nav_default_pop_enter_anim"
+			app:popExitAnim="@anim/nav_default_pop_exit_anim"
 			android:id="@+id/action_headerFragment_to_hotSpotFragment"
 			app:destination="@id/hotSpotFragment" />
 		<action
@@ -206,6 +221,12 @@
 		android:id="@+id/dialerFragment"
 		android:name="sh.siava.pixelxpert.ui.fragments.DialerFragment" />
 	<fragment
+		android:id="@+id/gboardFragment"
+		android:name="sh.siava.pixelxpert.ui.fragments.GboardFragment" />
+	<fragment
+		android:id="@+id/documentsUIFragment"
+		android:name="sh.siava.pixelxpert.ui.fragments.DocumentsUIFragment" />
+	<fragment
 		android:id="@+id/hotSpotFragment"
 		android:name="sh.siava.pixelxpert.ui.fragments.HotSpotFragment" />
 	<fragment
@@ -302,6 +323,21 @@
 			app:popExitAnim="@anim/nav_default_pop_exit_anim"
 			android:id="@+id/action_searchPreferenceFragment_to_dialerFragment"
 			app:destination="@id/dialerFragment" />
+		<action
+			app:enterAnim="@anim/nav_default_enter_anim"
+			app:exitAnim="@anim/nav_default_exit_anim"
+			app:popEnterAnim="@anim/nav_default_pop_enter_anim"
+			app:popExitAnim="@anim/nav_default_pop_exit_anim"
+			android:id="@+id/action_searchPreferenceFragment_to_gboardFragment"
+			app:destination="@id/gboardFragment" />
+		<action
+			app:enterAnim="@anim/nav_default_enter_anim"
+			app:exitAnim="@anim/nav_default_exit_anim"
+			app:popEnterAnim="@anim/nav_default_pop_enter_anim"
+			app:popExitAnim="@anim/nav_default_pop_exit_anim"
+			android:id="@+id/action_searchPreferenceFragment_to_documentsUIFragment"
+			app:destination="@id/documentsUIFragment" />
+
 		<action
 			app:enterAnim="@anim/nav_default_enter_anim"
 			app:exitAnim="@anim/nav_default_exit_anim"

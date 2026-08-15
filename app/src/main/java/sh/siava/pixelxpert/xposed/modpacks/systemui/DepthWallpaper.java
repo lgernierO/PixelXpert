@@ -2,10 +2,10 @@ package sh.siava.pixelxpert.xposed.modpacks.systemui;
 
 import static android.view.View.GONE;
 import static android.view.View.VISIBLE;
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getFloatField;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
-import static de.robv.android.xposed.XposedHelpers.setAdditionalInstanceField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getFloatField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setAdditionalInstanceField;
 import static sh.siava.pixelxpert.Constants.AI_METHOD_MLKIT;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 

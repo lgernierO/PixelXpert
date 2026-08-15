@@ -1,7 +1,7 @@
 package sh.siava.pixelxpert.xposed.modpacks.systemui;
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import static sh.siava.pixelxpert.xposed.modpacks.systemui.StatusbarMods.APP_SWITCH_SLOT;
 

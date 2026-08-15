@@ -131,8 +131,6 @@ dependencies {
 	annotationProcessor(project(":annotationProcessor"))
 	coreLibraryDesugaring(libs.desugar.jdk.libs)
 
-	compileOnly(files("lib/api-82.jar"))
-	compileOnly(files("lib/api-82-sources.jar"))
 
 	implementation(project(":Submodules:RangeSliderPreference"))
 
@@ -203,6 +201,7 @@ dependencies {
 
 	compileOnly(libs.lsposed.api)
 	implementation(libs.lsposed.service)
+	implementation(libs.dexkit)
 
 	//mark-down view for changelog
 	implementation(libs.markdownview.android)

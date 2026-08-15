@@ -3,8 +3,8 @@ package sh.siava.pixelxpert.xposed.utils;
 
 
 
-import static de.robv.android.xposed.XposedHelpers.callMethod;
-import static de.robv.android.xposed.XposedHelpers.getStaticObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getStaticObjectField;
 
 import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 

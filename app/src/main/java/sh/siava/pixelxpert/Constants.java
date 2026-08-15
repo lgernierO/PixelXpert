@@ -31,6 +31,8 @@ public final class Constants {
 	public static final String DIALER_PACKAGE = "com.google.android.dialer";
 	public static final String KSU_PACKAGE = "me.weishu.kernelsu";
 	public static final String KSU_NEXT_PACKAGE = "com.rifsxd.ksunext";
+	public static final String GBOARD_PACKAGE = "com.google.android.inputmethod.latin";
+	public static final String DOCUMENTS_UI_PACKAGE = "com.google.android.documentsui";
 
 	public static final String LAUNCH_REASON_EXTRA = "LAUNCH_REASON";
 	public static final String LAUNCH_REASON_XPOSED_SERVICE_FAIL = "XPOSED_SERVICE_FAIL";
