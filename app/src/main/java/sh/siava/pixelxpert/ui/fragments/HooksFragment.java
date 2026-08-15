@@ -226,7 +226,7 @@ public class HooksFragment extends BaseFragment {
 			callback.onScopeRequestFailed(getString(R.string.lsposed_not_found));
 			return;
 		}
-		mXposedService.requestScope(Collections.singletonList(pkgName), new XposedService.OnScopeEventListener() {
+		mXposedService.requestScope(Collections.singletonList(normalizeScopePackage(pkgName)), new XposedService.OnScopeEventListener() {
 			@Override
 			public void onScopeRequestApproved(@NonNull List<String> approved) {
 				XposedService.OnScopeEventListener.super.onScopeRequestApproved(approved);
@@ -461,9 +461,13 @@ public class HooksFragment extends BaseFragment {
 		}
 	}
 
+	private String normalizeScopePackage(String pkgName) {
+		return SYSTEM_FRAMEWORK_PACKAGE.equals(pkgName) ? "system" : pkgName;
+	}
+
 	private boolean isPackageEnabledInScope(String pkgName)
 	{
-		return mActiveScope.contains(pkgName);
+		return mActiveScope.contains(normalizeScopePackage(pkgName));
 	}
 
 	private boolean hasBootLooped(String pkgName) {

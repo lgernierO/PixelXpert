@@ -488,6 +488,14 @@ public class SettingsActivity extends BaseActivity implements PreferenceFragment
 				if (isTabletDevice) navController.popBackStack(R.id.headerFragment, false);
 				yield navigateTo(navController, R.id.action_headerFragment_to_dialerFragment);
 			}
+			case "gboard_header" -> {
+				if (isTabletDevice) navController.popBackStack(R.id.headerFragment, false);
+				yield navigateTo(navController, R.id.action_headerFragment_to_gboardFragment);
+			}
+			case "documentsui_header" -> {
+				if (isTabletDevice) navController.popBackStack(R.id.headerFragment, false);
+				yield navigateTo(navController, R.id.action_headerFragment_to_documentsUIFragment);
+			}
 			case "hotspot_header" -> {
 				if (isTabletDevice) navController.popBackStack(R.id.headerFragment, false);
 				yield navigateTo(navController, R.id.action_headerFragment_to_hotSpotFragment);
