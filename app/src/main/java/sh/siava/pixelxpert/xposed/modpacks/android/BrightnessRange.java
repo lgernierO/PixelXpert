@@ -38,6 +38,7 @@ public class BrightnessRange extends XposedModPack {
 			}
 		} catch (Throwable ignored) {
 		}
+		disableBrightnessCap = Xprefs.getBoolean("DisableBrightnessCap", false);
 	}
 
 	@Override
