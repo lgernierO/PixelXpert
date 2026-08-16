@@ -61,6 +61,20 @@ public class BrightnessRange extends XposedModPack {
 		} catch (Throwable ignored) {
 		}
 
+		try { //framework: remove system brightness cap (DisplayManager.setBrightnessCap / ExternalBrightnessModifier)
+			ReflectedClass ExternalBrightnessModifierClass = ReflectedClass.of("com.android.server.display.brightness.clamper.ExternalBrightnessModifier");
+
+			ExternalBrightnessModifierClass
+					.before("apply")
+					.run(param -> {
+						if (!disableBrightnessCap) return;
+
+						param.setResult(null);
+					});
+
+		} catch (Throwable ignored) {
+		}
+
 		try { //SystemUI
 			ReflectedClass BrightnessInfoClass = ReflectedClass.of("android.hardware.display.BrightnessInfo");
 
