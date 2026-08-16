@@ -407,17 +407,41 @@ public class PackageManager extends XposedModPack {
 		}
 	}
 
+	private void hookSharedUidInstallAllowList() {
+		try {
+			ReflectedClass.of("com.android.server.pm.ReconcilePackageUtils")
+					.before("reconcilePackages")
+					.run(param -> {
+						if (!allowMismatchedSignature || !allowSharedUidSignatureMismatch || param.args.length < 7) return;
+						try {
+							Object requests = param.args[0];
+							Object settings = param.args[5];
+							Object systemConfig = param.args[6];
+							Object allowList = callMethod(systemConfig, "getPackageToSharedUidAllowList");
+							if (!(requests instanceof Iterable<?>)) return;
+							for (Object request : (Iterable<?>) requests) {
+								Object packageSetting = callMethod(request, "getScannedPackageSetting");
+								if (packageSetting == null) continue;
+								Object sharedUser = callMethod(settings, "getSharedUserSettingLPr", packageSetting);
+								if (sharedUser == null) continue;
+								String packageName = callMethod(packageSetting, "getPackageName");
+								String sharedUserName = getObjectField(sharedUser, "name");
+								if (packageName != null && sharedUserName != null) {
+									callMethod(allowList, "put", packageName, sharedUserName);
+								}
+							}
+						} catch (Throwable t) {
+							Logger.log("PackageManager: failed to prepare system shared UID allow-list", t);
+						}
+					});
+		} catch (Throwable t) {
+			Logger.log("PackageManager: failed to hook system shared UID allow-list", t);
+		}
+	}
+
 	private void deoptimizePackageInstallCallers() {
 		if (allowMismatchedSignature && allowSharedUidSignatureMismatch) {
-			try {
-				Class<?> reconcilePackageUtils = ReflectedClass.of("com.android.server.pm.ReconcilePackageUtils").getClazz();
-				Field allowNonPreloads = reconcilePackageUtils.getDeclaredField("ALLOW_NON_PRELOADS_SYSTEM_SHAREDUIDS");
-				allowNonPreloads.setAccessible(true);
-				allowNonPreloads.setBoolean(null, true);
-			} catch (NoSuchFieldException ignored) {
-			} catch (Throwable t) {
-				Logger.log("PackageManager: failed to allow system shared UID installs", t);
-			}
+			hookSharedUidInstallAllowList();
 		}
 		for (String className : new String[]{
 				"com.android.server.pm.ReconcilePackageUtils",

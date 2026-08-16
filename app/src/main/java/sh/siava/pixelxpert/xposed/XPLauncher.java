@@ -1,6 +1,7 @@
 package sh.siava.pixelxpert.xposed;
 
 import static android.content.Context.CONTEXT_IGNORE_SECURITY;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setObjectField;
 import static sh.siava.pixelxpert.BuildConfig.APPLICATION_ID;
@@ -117,9 +118,16 @@ public class XPLauncher extends XposedModule implements ServiceConnection {
 					.before("init")
 					.run(instance,param -> {
 						try {
-							initializeSystemServer(PRParam, (Context) param.args[0]);
+							if (param.args.length == 0 || param.args[0] == null) return;
+							Object contextArgument = param.args[0];
+							Object context = contextArgument instanceof Context
+									? contextArgument
+									: callMethod(contextArgument, "getContext");
+							if (context instanceof Context) {
+								initializeSystemServer(PRParam, (Context) context);
+							}
 						} catch (Throwable t) {
-							Logger.log(t);
+							Logger.log("PixelXpert: failed to obtain PhoneWindowManager context", t);
 						}
 					});
 		}

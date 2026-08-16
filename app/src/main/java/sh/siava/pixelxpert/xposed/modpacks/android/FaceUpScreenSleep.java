@@ -143,7 +143,8 @@ public class FaceUpScreenSleep extends XposedModPack {
 		{
 			if((boolean) callMethod(mPowerGroups.valueAt(i), "isDefaultOrAdjacentGroup"))
 			{
-				callMethod(mGroupIDs, "add", callMethod(mPowerGroups.valueAt(i), "getGroupId"));
+				Object groupId = callMethod(mPowerGroups.valueAt(i), "getGroupId");
+				callMethod(mGroupIDs, "add", groupId);
 			}
 		}
 		return mGroupIDs;
