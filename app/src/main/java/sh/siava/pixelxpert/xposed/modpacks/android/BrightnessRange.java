@@ -20,6 +20,7 @@ import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 public class BrightnessRange extends XposedModPack {
 	private static float minimumBrightnessLevel = 0f;
 	private static float maximumBrightnessLevel = 1f;
+	private static boolean disableBrightnessCap = false;
 
 	public BrightnessRange(Context context) {
 		super(context);
