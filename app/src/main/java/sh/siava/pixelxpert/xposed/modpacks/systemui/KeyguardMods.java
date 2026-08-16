@@ -112,6 +112,7 @@ public class KeyguardMods extends XposedModPack {
 	//endregion
 
 	private static boolean AnimateFlashlight = false;
+	private static boolean DisableStrongAuthTimeout = false;
 
 	public KeyguardMods(Context context) {
 		super(context);
@@ -143,6 +144,7 @@ public class KeyguardMods extends XposedModPack {
 		}
 
 		AnimateFlashlight = Xprefs.getBoolean("AnimateFlashlight", false);
+		DisableStrongAuthTimeout = Xprefs.getBoolean("DisableStrongAuthTimeout", false);
 
 		if (Key.length > 0) {
 			switch (Key[0]) {
@@ -431,6 +433,16 @@ public class KeyguardMods extends XposedModPack {
 					if (mDozing != (boolean) getObjectField(param.thisObject, "mDozing")) {
 						mDozing = !mDozing;
 						setMiddleColor();
+					}
+				});
+
+		//remove 72-hour strong auth timeout requirement
+		ReflectedClass StrongAuthTrackerClass = ReflectedClass.of("com.android.internal.widget.LockPatternUtils$StrongAuthTracker");
+		StrongAuthTrackerClass
+				.after("getStrongAuthForUser")
+				.run(param -> {
+					if (DisableStrongAuthTimeout) {
+						param.setResult(((int) param.getResult()) & ~0x10);
 					}
 				});
 	}

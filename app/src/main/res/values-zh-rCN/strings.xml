@@ -99,6 +99,8 @@
     <string name="wakeup_to_security_title">设备唤醒时显示密码输入界面</string>
     <string name="easy_unlock_title">简易解锁 (Pin/密码)</string>
     <string name="easy_unlock_summary">如果第一次未生效，请重试</string>
+    <string name="disable_strong_auth_timeout_title">跳过 72 小时锁屏安全验证</string>
+    <string name="disable_strong_auth_timeout_summary">设备超过 72 小时未使用强身份验证解锁时，不再强制要求输入锁屏密码</string>
     <string name="charging_info_title">锁屏显示充电信息</string>
     <string name="disable_lockscreen_pill_title">不显示 “自定义锁屏”胶囊</string>
     <string name="imperial_units_title">使用英制单位</string>

@@ -106,6 +106,8 @@
     <string name="wakeup_to_security_title">Show security input on device wake</string>
     <string name="easy_unlock_title">Easy unlock (Pin/Password)</string>
     <string name="easy_unlock_summary">If it didn\'t work the first time, try again</string>
+    <string name="disable_strong_auth_timeout_title">Skip 72-hour lock security</string>
+    <string name="disable_strong_auth_timeout_summary">Don\'t require the lock screen password if the device hasn\'t been unlocked with strong authentication for over 72 hours</string>
     <string name="charging_info_title">Charging information on lockscreen</string>
     <string name="disable_lockscreen_pill_title">Don\'t show \"Customize Lock Screen\" pill</string>
     <string name="imperial_units_title">Use imperial units</string>
