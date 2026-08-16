@@ -108,6 +108,15 @@
 
 		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
 			android:defaultValue="false"
+			android:key="NeverScreenOff"
+			android:summary="@string/never_screen_off_summary"
+			android:summaryOff="@string/general_off"
+			android:summaryOn="@string/general_on"
+			android:title="@string/never_screen_off_title"
+			app:iconSpaceReserved="false" />
+
+		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
+			android:defaultValue="false"
 			android:key="displayOverrideEnabled"
 			android:summary="@string/display_resolution_switch_summary"
 			android:title="@string/display_resolution_switch_title"

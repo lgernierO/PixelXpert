@@ -315,6 +315,9 @@
     <string name="brightness_range_not_linear">这个范围不是线性的,有时一个小的差异会导致相当大的变化</string>
     <string name="disable_brightness_cap">解除系统亮度上限</string>
     <string name="disable_brightness_cap_summary">解除系统亮度上限限制，使屏幕亮度可达到硬件实际最大值</string>
+    <string name="never_screen_off_title">永不熄屏</string>
+    <string name="never_screen_off_summary">在系统设置 → 显示 → 熄屏时间中添加“永不”选项</string>
+    <string name="never_screen_off_option">永不</string>
     <string name="so_taptaptorch_title">锁屏双击并按住开启临时手电筒</string>
     <string name="so_taptaptorch_summary">在锁屏任意位置双击并按住可临时开启手电筒，松手关闭；启用“长按后向内滑动确认”时此功能停用</string>
     <string name="so_fingerprint_sensor_enabled">屏幕关闭时启用指纹传感器</string>

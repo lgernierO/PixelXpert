@@ -312,6 +312,9 @@
     <string name="brightness_range_not_linear">這個範圍不是線性的,有時一個小的差異會導致相當大的變化</string>
     <string name="disable_brightness_cap">解除系統亮度上限</string>
     <string name="disable_brightness_cap_summary">解除系統亮度上限限制，使螢幕亮度可達到硬體實際最大值</string>
+    <string name="never_screen_off_title">永不關閉螢幕</string>
+    <string name="never_screen_off_summary">在系統設定 → 顯示 → 螢幕逾時中新增「永不」選項</string>
+    <string name="never_screen_off_option">永不</string>
     <string name="so_taptaptorch_title">鎖定畫面雙擊開啟手電筒</string>
     <string name="so_taptaptorch_summary">鎖定畫面時 雙擊+長按開啟手電筒</string>
     <string name="so_fingerprint_sensor_enabled">螢幕關閉時啟用指紋感測器</string>
