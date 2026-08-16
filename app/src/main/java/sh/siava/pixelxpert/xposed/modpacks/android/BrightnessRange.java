@@ -61,15 +61,15 @@ public class BrightnessRange extends XposedModPack {
 		} catch (Throwable ignored) {
 		}
 
-		try { //framework: remove system brightness cap (DisplayManager.setBrightnessCap / ExternalBrightnessModifier)
+		try { //framework: remove only the external DisplayManager.setBrightnessCap limit
 			ReflectedClass ExternalBrightnessModifierClass = ReflectedClass.of("com.android.server.display.brightness.clamper.ExternalBrightnessModifier");
 
 			ExternalBrightnessModifierClass
-					.before("apply")
+					.after("shouldApplyCap")
 					.run(param -> {
-						if (!disableBrightnessCap) return;
-
-						param.setResult(null);
+						if (disableBrightnessCap) {
+							param.setResult(false);
+						}
 					});
 
 		} catch (Throwable ignored) {
@@ -81,9 +81,6 @@ public class BrightnessRange extends XposedModPack {
 			BrightnessInfoClass
 					.afterConstruction()
 					.run(param -> {
-						if (disableBrightnessCap) {
-							setObjectField(param.thisObject, "brightnessMaximum", 1f);
-						}
 						if (minimumBrightnessLevel > 0f) {
 							setObjectField(param.thisObject, "brightnessMinimum", minimumBrightnessLevel);
 						}
