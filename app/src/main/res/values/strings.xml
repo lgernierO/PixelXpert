@@ -333,6 +333,8 @@
 
     <string name="brightness_range_title">Display brightness limits</string>
     <string name="brightness_range_not_linear">This range is NOT linear: Sometimes a small difference leads to considerable changes</string>
+    <string name="disable_brightness_cap">Remove system brightness cap</string>
+    <string name="disable_brightness_cap_summary">Remove the system brightness limit so screen brightness can reach the hardware maximum</string>
 
     <string name="so_taptaptorch_title">Enable double-tap for lockscreen torch</string>
     <string name="so_taptaptorch_summary">Double-tap and hold lockscreen for quick torch access</string>
