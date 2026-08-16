@@ -81,6 +81,9 @@ public class BrightnessRange extends XposedModPack {
 			BrightnessInfoClass
 					.afterConstruction()
 					.run(param -> {
+						if (disableBrightnessCap) {
+							setObjectField(param.thisObject, "brightnessMaximum", 1f);
+						}
 						if (minimumBrightnessLevel > 0f) {
 							setObjectField(param.thisObject, "brightnessMinimum", minimumBrightnessLevel);
 						}
