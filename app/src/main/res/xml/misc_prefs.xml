@@ -99,6 +99,15 @@
 
 		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
 			android:defaultValue="false"
+			android:key="DisableBrightnessCap"
+			android:summary="@string/disable_brightness_cap_summary"
+			android:summaryOff="@string/general_off"
+			android:summaryOn="@string/general_on"
+			android:title="@string/disable_brightness_cap"
+			app:iconSpaceReserved="false" />
+
+		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
+			android:defaultValue="false"
 			android:key="displayOverrideEnabled"
 			android:summary="@string/display_resolution_switch_summary"
 			android:title="@string/display_resolution_switch_title"
