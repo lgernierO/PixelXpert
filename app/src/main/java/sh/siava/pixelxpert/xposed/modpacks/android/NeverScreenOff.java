@@ -1,6 +1,9 @@
 package sh.siava.pixelxpert.xposed.modpacks.android;
 
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getLongField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
+import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setObjectField;
 
 import android.content.Context;
 import android.content.res.Resources;
@@ -119,6 +122,26 @@ public class NeverScreenOff extends XposedModPack {
 							&& maximumTimeout.longValue() >= NEVER_TIMEOUT_SENTINEL
 							&& isNeverTimeoutSelected()) {
 						param.setResult(XPLauncher.moduleResources.getString(R.string.never_screen_off_option));
+					}
+				});
+
+		// CANARY's ProtectedSelectorWithWidgetPreference.onClick() requires a lock-screen
+		// verification whenever the chosen timeout is larger than the current one. The
+		// "Never" sentinel is always larger than any normal option and the auth flag is
+		// reset on every page entry, so picking "Never" would prompt verification every
+		// single time. Skip that prompt only for the "Never" option.
+		ReflectedClass.of("com.android.settings.display.ScreenTimeoutSettings$ProtectedSelectorWithWidgetPreference")
+				.before("onClick")
+				.run(param -> {
+					if (!neverScreenOffEnabled) return;
+					try {
+						long timeoutMs = getLongField(param.thisObject, "mTimeoutMs");
+						if (timeoutMs != NEVER_TIMEOUT_SENTINEL) return;
+						Object settings = getObjectField(param.thisObject, "mScreenTimeoutSettings");
+						if (settings != null) {
+							setObjectField(settings, "mIsUserAuthenticated", true);
+						}
+					} catch (Throwable ignored) {
 					}
 				});
 	}
