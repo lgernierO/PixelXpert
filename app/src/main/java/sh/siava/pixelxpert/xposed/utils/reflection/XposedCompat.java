@@ -114,7 +114,13 @@ public final class XposedCompat {
 
 	public static Object invokeOriginalMethod(Method method, Object object, Object[] arguments) throws Throwable {
 		try {
-			return ReflectedClass.getDefaultXposedInterface().getInvoker(method).invoke(object, arguments);
+			//libxposed invokers default to Invoker.Type.Chain.FULL, so invoking a method we hooked
+			//ourselves would re-enter our own hook and recurse until StackOverflowError.
+			//Type.ORIGIN restores the legacy XposedBridge.invokeOriginalMethod semantics.
+			return ReflectedClass.getDefaultXposedInterface()
+					.getInvoker(method)
+					.setType(XposedInterface.Invoker.Type.ORIGIN)
+					.invoke(object, arguments);
 		} catch (InvocationTargetException exception) {
 			throw exception.getCause();
 		}
