@@ -120,6 +120,8 @@ public class GboardMods extends XposedModPack {
 			"enable_nwp_tflite_engine", "enable_emoji_predictor_tflite_engine");
 	private static final Set<String> FAST_ACCESS_FLAGS = Set.of(
 			"enable_fast_access_bar", "keyboard_redesign_google_sans");
+	private static final Set<String> CLIPBOARD_HISTORY_FLAGS = Set.of(
+			"enable_extended_clipboard_history");
 	private static final Set<String> ALL_FLAGS = buildAllFlags();
 
 	public GboardMods(Context context) {
@@ -261,6 +263,12 @@ public class GboardMods extends XposedModPack {
 				String.class, String[].class, String.class);
 		ReflectedClass.of(ContentResolver.class).before(query).run(param -> {
 			if (!clipboardHistory) return;
+			Uri uri = param.getArg(0);
+			String authority = uri == null ? null : uri.getAuthority();
+			// Gboard's clipboard provider authority is always "<packageName>.clipboard_content";
+			// without this gate any query mentioning "timestamp" was rewritten (LIMIT/time window),
+			// corrupting unrelated Gboard internals and intermittently hiding fresh clips.
+			if (authority == null || !authority.endsWith(".clipboard_content")) return;
 			String[] projection = param.getArg(1);
 			String selection = param.getArg(2);
 			String[] selectionArgs = param.getArg(3);
@@ -281,7 +289,10 @@ public class GboardMods extends XposedModPack {
 			Object first = set.isEmpty() ? null : set.iterator().next();
 			if (first == null || !"j$.time.Instant".equals(first.getClass().getName())) return;
 			Object backingMap = getObjectField(set, "map");
-			if (backingMap instanceof Map<?, ?> map && map.size() <= clipboardSize) {
+			// Only intervene when the real count exceeds the visible cap. Lying about small
+			// sets (e.g. 1 pinned clip reported as 5) desynchronized Gboard's internal
+			// merge/trim decisions and could hide freshly copied entries.
+			if (backingMap instanceof Map<?, ?> map && map.size() > clipboardSize) {
 				param.setResult(5);
 			}
 		});
@@ -367,6 +378,8 @@ public class GboardMods extends XposedModPack {
 				&& (name.equals("enable_clipboard_entity_extraction") || name.equals("enable_clipboard_query_refactoring"))) {
 			return disabled;
 		}
+		// Without this, Gboard prunes clips after ~1 hour regardless of the visible-day window.
+		if (clipboardHistory && CLIPBOARD_HISTORY_FLAGS.contains(name)) return enabled;
 		if (privacyFlags && PRIVACY_TRUE_FLAGS.contains(name)) return enabled;
 		if (privacyFlags && PRIVACY_FALSE_FLAGS.contains(name)) return disabled;
 		if (aiFeatures && AI_FLAGS.contains(name)) return enabled;
@@ -399,7 +412,8 @@ public class GboardMods extends XposedModPack {
 	private static Set<String> buildAllFlags() {
 		return combine(AI_FLAGS, GRAMMAR_FLAGS, MULTILINGUAL_FLAGS, FLOATING_FLAGS, EMOJI_FLAGS,
 				ACCESS_POINT_FLAGS, METERED_FLAGS, PRIVACY_TRUE_FLAGS, PRIVACY_FALSE_FLAGS, INLINE_FLAGS,
-				PROACTIVE_EMOJI_FLAGS, CLIPBOARD_CHIP_FLAGS, TFLITE_FLAGS, FAST_ACCESS_FLAGS);
+				PROACTIVE_EMOJI_FLAGS, CLIPBOARD_CHIP_FLAGS, TFLITE_FLAGS, FAST_ACCESS_FLAGS,
+				CLIPBOARD_HISTORY_FLAGS);
 	}
 
 	private static int parseInt(String value, int fallback, int minimum, int maximum) {
