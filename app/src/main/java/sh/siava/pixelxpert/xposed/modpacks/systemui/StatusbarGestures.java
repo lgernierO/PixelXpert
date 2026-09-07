@@ -39,10 +39,6 @@ public class StatusbarGestures extends XposedModPack {
 	 */
 	private static final int STATUSBAR_MODE_SHADE_LOCKED = 2;
 
-	/** Max duration of a status-bar press that still counts as a tap. */
-	private static final long TAP_TIMEOUT_MS = 300L;
-	/** Max finger travel (dp) that still counts as a tap instead of a drag. */
-	private static final float TAP_SLOP_DP = 12f;
 	/** Ignore repeated triggers coming from duplicated touch delivery. */
 	private static final long SCROLL_TOP_DEBOUNCE_MS = 400L;
 	/** InputManager.INJECT_INPUT_EVENT_MODE_ASYNC */
@@ -57,10 +53,7 @@ public class StatusbarGestures extends XposedModPack {
 	private boolean StatusbarLongpressAppSwitch = false;
 	private static boolean statusbarTapScrollTopEnabled = false;
 	private MotionEvent mDownEvent;
-	private float mTapDownX = 0f;
-	private float mTapDownY = 0f;
-	private long mTapDownTime = 0L;
-	private boolean mTapCandidate = false;
+	private GestureDetector mTapToTopDetector;
 	private long mLastScrollTopTime = 0L;
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
@@ -118,6 +111,11 @@ public class StatusbarGestures extends XposedModPack {
 
 		mGestureDetector = new GestureDetector(mContext, getPullDownLPListener());
 
+		// Separate detector: the pulldown listener must not see its stream altered,
+		// and tap-to-top needs double-tap arbitration of its own.
+		mTapToTopDetector = new GestureDetector(mContext, new GestureListener());
+		mTapToTopDetector.setOnDoubleTapListener(getTapToTopListener());
+
 		PhoneStatusBarViewClass
 				.after("onTouchEvent")
 				.run(param -> {
@@ -128,7 +126,9 @@ public class StatusbarGestures extends XposedModPack {
 
 					// Tap-to-top must observe the same touch stream, but it has to stay
 					// independent from the one-finger pulldown preference.
-					handleTapToScrollTop(event);
+					if (statusbarTapScrollTopEnabled) {
+						mTapToTopDetector.onTouchEvent(event);
+					}
 
 					if (!oneFingerPulldownEnabled) return;
 
@@ -182,55 +182,34 @@ public class StatusbarGestures extends XposedModPack {
 	 * current app".  SystemUI has no reference to the foreground app's scrolling
 	 * views, so the tap is translated into a MOVE_HOME key event that scrollable
 	 * widgets (ScrollView, RecyclerView, ListView, WebView, ...) already honor.
+	 * <p>
+	 * The detection deliberately runs through {@code onSingleTapConfirmed} so it
+	 * cannot race the double-tap-to-sleep gesture in {@link ScreenGestures},
+	 * which hooks the very same {@code PhoneStatusBarView.onTouchEvent}: a
+	 * confirmed single tap is only reported once the double-tap window elapsed.
 	 */
-	private void handleTapToScrollTop(MotionEvent event) {
-		if (!statusbarTapScrollTopEnabled || event == null) return;
+	private GestureDetector.OnDoubleTapListener getTapToTopListener() {
+		return new GestureDetector.OnDoubleTapListener() {
+			@Override
+			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
+				if (!statusbarTapScrollTopEnabled) return false;
+				// A tap while the shade is open belongs to the shade, not the app.
+				if (!isStatusbarClosed()) return false;
 
-		try {
-			switch (event.getActionMasked()) {
-				case MotionEvent.ACTION_DOWN:
-					mTapDownX = event.getRawX();
-					mTapDownY = event.getRawY();
-					mTapDownTime = event.getEventTime();
-					// Only a closed shade means the user is really looking at an app.
-					mTapCandidate = isStatusbarClosed();
-					break;
-
-				case MotionEvent.ACTION_POINTER_DOWN:
-					// Multi-finger gestures are never a tap.
-					mTapCandidate = false;
-					break;
-
-				case MotionEvent.ACTION_MOVE:
-					if (mTapCandidate && exceedsTapSlop(event)) {
-						mTapCandidate = false;
-					}
-					break;
-
-				case MotionEvent.ACTION_UP:
-					if (mTapCandidate
-							&& !exceedsTapSlop(event)
-							&& event.getEventTime() - mTapDownTime <= TAP_TIMEOUT_MS) {
-						scrollForegroundAppToTop();
-					}
-					mTapCandidate = false;
-					break;
-
-				default:
-					mTapCandidate = false;
-					break;
+				scrollForegroundAppToTop();
+				return false;
 			}
-		} catch (Throwable ignored) {
-			mTapCandidate = false;
-		}
-	}
 
-	private boolean exceedsTapSlop(MotionEvent event) {
-		float dx = Math.abs(event.getRawX() - mTapDownX);
-		float dy = Math.abs(event.getRawY() - mTapDownY);
-		float slop = TAP_SLOP_DP * mContext.getResources().getDisplayMetrics().density;
+			@Override
+			public boolean onDoubleTap(@NonNull MotionEvent e) {
+				return false;
+			}
 
-		return dx > slop || dy > slop;
+			@Override
+			public boolean onDoubleTapEvent(@NonNull MotionEvent e) {
+				return false;
+			}
+		};
 	}
 
 	private void scrollForegroundAppToTop() {
