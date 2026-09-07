@@ -7,8 +7,12 @@ import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Rect;
+import android.hardware.input.InputManager;
 import android.os.SystemClock;
 import android.view.GestureDetector;
+import android.view.InputDevice;
+import android.view.KeyCharacterMap;
+import android.view.KeyEvent;
 import android.view.MotionEvent;
 
 import androidx.annotation.NonNull;
@@ -35,6 +39,15 @@ public class StatusbarGestures extends XposedModPack {
 	 */
 	private static final int STATUSBAR_MODE_SHADE_LOCKED = 2;
 
+	/** Max duration of a status-bar press that still counts as a tap. */
+	private static final long TAP_TIMEOUT_MS = 300L;
+	/** Max finger travel (dp) that still counts as a tap instead of a drag. */
+	private static final float TAP_SLOP_DP = 12f;
+	/** Ignore repeated triggers coming from duplicated touch delivery. */
+	private static final long SCROLL_TOP_DEBOUNCE_MS = 400L;
+	/** InputManager.INJECT_INPUT_EVENT_MODE_ASYNC */
+	private static final int INJECT_INPUT_EVENT_MODE_ASYNC = 0;
+
 	private static int pullDownSide = PULLDOWN_SIDE_RIGHT;
 	private static boolean oneFingerPulldownEnabled = false;
 	private boolean oneFingerPullupEnabled = false;
@@ -42,7 +55,13 @@ public class StatusbarGestures extends XposedModPack {
 	private Object NotificationPanelViewController;
 	GestureDetector mGestureDetector;
 	private boolean StatusbarLongpressAppSwitch = false;
+	private static boolean statusbarTapScrollTopEnabled = false;
 	private MotionEvent mDownEvent;
+	private float mTapDownX = 0f;
+	private float mTapDownY = 0f;
+	private long mTapDownTime = 0L;
+	private boolean mTapCandidate = false;
+	private long mLastScrollTopTime = 0L;
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
 	private Object ShadeInteractorSceneContainerImpl;
@@ -61,6 +80,7 @@ public class StatusbarGestures extends XposedModPack {
 		pullDownSide = Integer.parseInt(Xprefs.getString("QSPulldownSide", "1"));
 
 		StatusbarLongpressAppSwitch = Xprefs.getBoolean("StatusbarLongpressAppSwitch", false);
+		statusbarTapScrollTopEnabled = Xprefs.getBoolean("StatusbarTapScrollTop", false);
 	}
 
 	public static void collapseQSPanel()
@@ -101,12 +121,16 @@ public class StatusbarGestures extends XposedModPack {
 		PhoneStatusBarViewClass
 				.after("onTouchEvent")
 				.run(param -> {
-					if (!oneFingerPulldownEnabled) return;
-
 					MotionEvent event =
 							param.args[0] instanceof MotionEvent
 									? (MotionEvent) param.args[0]
 									: (MotionEvent) param.args[1];
+
+					// Tap-to-top must observe the same touch stream, but it has to stay
+					// independent from the one-finger pulldown preference.
+					handleTapToScrollTop(event);
+
+					if (!oneFingerPulldownEnabled) return;
 
 					mGestureDetector.onTouchEvent(event);
 				});
@@ -146,13 +170,100 @@ public class StatusbarGestures extends XposedModPack {
 							});
 				});
 	}
-
 	private void onStatusBarLongPress(HookHelper.RunParam param) {
 		if (StatusbarLongpressAppSwitch) {
 			sendAppSwitchBroadcast();
 			param.setResult(null);
 		}
 	}
+
+	/**
+	 * Chinese-ROM style "tap the status bar to jump back to the top of the
+	 * current app".  SystemUI has no reference to the foreground app's scrolling
+	 * views, so the tap is translated into a MOVE_HOME key event that scrollable
+	 * widgets (ScrollView, RecyclerView, ListView, WebView, ...) already honor.
+	 */
+	private void handleTapToScrollTop(MotionEvent event) {
+		if (!statusbarTapScrollTopEnabled || event == null) return;
+
+		try {
+			switch (event.getActionMasked()) {
+				case MotionEvent.ACTION_DOWN:
+					mTapDownX = event.getRawX();
+					mTapDownY = event.getRawY();
+					mTapDownTime = event.getEventTime();
+					// Only a closed shade means the user is really looking at an app.
+					mTapCandidate = isStatusbarClosed();
+					break;
+
+				case MotionEvent.ACTION_POINTER_DOWN:
+					// Multi-finger gestures are never a tap.
+					mTapCandidate = false;
+					break;
+
+				case MotionEvent.ACTION_MOVE:
+					if (mTapCandidate && exceedsTapSlop(event)) {
+						mTapCandidate = false;
+					}
+					break;
+
+				case MotionEvent.ACTION_UP:
+					if (mTapCandidate
+							&& !exceedsTapSlop(event)
+							&& event.getEventTime() - mTapDownTime <= TAP_TIMEOUT_MS) {
+						scrollForegroundAppToTop();
+					}
+					mTapCandidate = false;
+					break;
+
+				default:
+					mTapCandidate = false;
+					break;
+			}
+		} catch (Throwable ignored) {
+			mTapCandidate = false;
+		}
+	}
+
+	private boolean exceedsTapSlop(MotionEvent event) {
+		float dx = Math.abs(event.getRawX() - mTapDownX);
+		float dy = Math.abs(event.getRawY() - mTapDownY);
+		float slop = TAP_SLOP_DP * mContext.getResources().getDisplayMetrics().density;
+
+		return dx > slop || dy > slop;
+	}
+
+	private void scrollForegroundAppToTop() {
+		long now = SystemClock.uptimeMillis();
+		// Guard against the double delivery that happens when both the view and
+		// its controller forward the same gesture.
+		if (now - mLastScrollTopTime < SCROLL_TOP_DEBOUNCE_MS) return;
+		mLastScrollTopTime = now;
+
+		new Thread(() -> {
+			try {
+				injectKey(KeyEvent.KEYCODE_MOVE_HOME);
+			} catch (Throwable ignored) {}
+		}).start();
+	}
+
+	private void injectKey(int keyCode) {
+		InputManager inputManager = mContext.getSystemService(InputManager.class);
+		if (inputManager == null) return;
+
+		long now = SystemClock.uptimeMillis();
+
+		KeyEvent down = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0,
+				KeyEvent.META_CTRL_ON, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
+				KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
+		KeyEvent up = new KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0,
+				KeyEvent.META_CTRL_ON, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
+				KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
+
+		callMethod(inputManager, "injectInputEvent", down, INJECT_INPUT_EVENT_MODE_ASYNC);
+		callMethod(inputManager, "injectInputEvent", up, INJECT_INPUT_EVENT_MODE_ASYNC);
+	}
+
 
 	//speedfactor & heightfactor are based on display height
 	private boolean isValidFling(MotionEvent e1, MotionEvent e2, float velocityY, float speedFactor, float heightFactor) {

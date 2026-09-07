@@ -13,7 +13,6 @@
         android:title="@string/statusbar_general_options"
         app:iconSpaceReserved="false"
         search:ignore="true">
-
         <sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
             android:defaultValue="false"
             android:key="DoubleTapSleep"
@@ -21,6 +20,14 @@
             android:summaryOn="@string/general_on"
             android:title="@string/double_tap_sleep_title"
             app:iconSpaceReserved="false" />
+
+        <sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
+            android:defaultValue="false"
+            android:key="StatusbarTapScrollTop"
+            android:summary="@string/statusbar_tap_scroll_top_summary"
+            android:title="@string/statusbar_tap_scroll_top_title"
+            app:iconSpaceReserved="false" />
+
 
         <!--SeekBarPreference
             android:layout_width="wrap_content"

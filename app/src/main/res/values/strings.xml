@@ -114,6 +114,8 @@
 
     <!--Status bar related-->
     <string name="double_tap_sleep_title">Double-tap to sleep</string>
+    <string name="statusbar_tap_scroll_top_title">Tap status bar to scroll to top</string>
+    <string name="statusbar_tap_scroll_top_summary">Single-tap the status bar to send the foreground app back to the top of its content</string>
     <string name="sb_multi_row_system_icons">Multi-row system icons (needs raised statusbar height)</string>
     <string name="sb_multi_row_notification_icons">Multi-row notification icons (needs raised statusbar height)</string>
     <string name="sb_double_row_category">Double Statusbar rows</string>
