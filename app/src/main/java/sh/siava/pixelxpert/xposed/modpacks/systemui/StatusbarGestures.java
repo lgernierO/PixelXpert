@@ -116,16 +116,43 @@ public class StatusbarGestures extends XposedModPack {
 		mTapToTopDetector = new GestureDetector(mContext, new GestureListener());
 		mTapToTopDetector.setOnDoubleTapListener(getTapToTopListener());
 
+		// PhoneStatusBarView.onTouchEvent is a dead end on this build: it only
+		// verifies the touchable region and then logs "No touch handler provided;
+		// eating gesture".  Real gestures arrive at the OnTouchListener that
+		// PhoneStatusBarViewController.createClickListener() installs on the view,
+		// so the touch stream has to be observed there.
+		ReflectedClass StatusBarClickListenerClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.phone.PhoneStatusBarViewController$createClickListener$1");
+		// ofIfPossible() always returns a wrapper, so the class itself has to be
+		// inspected to know whether the hook target really exists.
+		final boolean hasClickListener = StatusBarClickListenerClass.getClazz() != null;
+
+		StatusBarClickListenerClass
+				.after("onTouch")
+				.run(param -> {
+					MotionEvent event = param.getArg(1);
+					if (event == null) return;
+
+					if (statusbarTapScrollTopEnabled) {
+						mTapToTopDetector.onTouchEvent(event);
+					}
+
+					if (!oneFingerPulldownEnabled) return;
+
+					mGestureDetector.onTouchEvent(event);
+				});
+
+		// Legacy fallback for builds that still route touches through the view.
 		PhoneStatusBarViewClass
 				.after("onTouchEvent")
 				.run(param -> {
+					if (hasClickListener) return;
+
 					MotionEvent event =
 							param.args[0] instanceof MotionEvent
 									? (MotionEvent) param.args[0]
 									: (MotionEvent) param.args[1];
 
-					// Tap-to-top must observe the same touch stream, but it has to stay
-					// independent from the one-finger pulldown preference.
 					if (statusbarTapScrollTopEnabled) {
 						mTapToTopDetector.onTouchEvent(event);
 					}

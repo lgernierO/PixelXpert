@@ -103,6 +103,9 @@ public class ScreenGestures extends XposedModPack {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.of("com.android.systemui.shade.NotificationPanelViewController");
 		ReflectedClass DozeTriggersClass = ReflectedClass.of("com.android.systemui.doze.DozeTriggers");
 		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass StatusBarClickListenerClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.phone.PhoneStatusBarViewController$createClickListener$1");
+		final boolean hasClickListener = StatusBarClickListenerClass.getClazz() != null;
 		ReflectedClass TriggerSensorClass = ReflectedClass.of("com.android.systemui.doze.DozeSensors$TriggerSensor");
 		ReflectedClass DefaultSettingsPopupMenuSectionClass = ReflectedClass.of("com.android.systemui.keyguard.ui.view.layout.sections.DefaultSettingsPopupMenuSection");
 
@@ -183,16 +186,30 @@ public class ScreenGestures extends XposedModPack {
 					}
 				});
 
-		PhoneStatusBarViewClass
-				.before("onTouchEvent")
-				.run(param -> {
-					if (!doubleTapToSleepStatusbarEnabled) return;
+		if (hasClickListener) {
+			StatusBarClickListenerClass
+					.before("onTouch")
+					.run(param -> {
+						if (!doubleTapToSleepStatusbarEnabled) return;
 
-					//double tap to sleep, statusbar only
-					if (statusBarDoubleTapAllowed()) {
-						mLockscreenDoubleTapToSleep.onTouchEvent((MotionEvent) param.args[param.args.length - 1]);
-					}
-		});
+						// Real CANARY path: status-bar touches arrive here.
+						if (statusBarDoubleTapAllowed()) {
+							mLockscreenDoubleTapToSleep.onTouchEvent(param.getArg(1));
+						}
+					});
+		} else {
+			// Legacy fallback for builds where PhoneStatusBarView owns the touch path.
+			PhoneStatusBarViewClass
+					.before("onTouchEvent")
+					.run(param -> {
+						if (!doubleTapToSleepStatusbarEnabled) return;
+
+						if (statusBarDoubleTapAllowed()) {
+							mLockscreenDoubleTapToSleep.onTouchEvent(
+									(MotionEvent) param.args[param.args.length - 1]);
+						}
+					});
+		}
 
 		TriggerSensorClass
 				.afterConstruction()

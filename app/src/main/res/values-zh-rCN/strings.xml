@@ -106,6 +106,8 @@
     <string name="imperial_units_title">使用英制单位</string>
     <!--Status bar related-->
     <string name="double_tap_sleep_title">双击息屏</string>
+    <string name="statusbar_tap_scroll_top_title">单击状态栏回到顶部</string>
+    <string name="statusbar_tap_scroll_top_summary">单击状态栏，让当前应用的内容回到顶部</string>
     <string name="sb_multi_row_system_icons">多行状态图标 (需要增加状态栏高度)</string>
     <string name="sb_multi_row_notification_icons">多行通知图标 (需要增加状态栏高度)</string>
     <string name="sb_double_row_category">多行状态栏</string>
