@@ -195,7 +195,6 @@ public class ScreenGestures extends XposedModPack {
 		// CANARY: PhoneStatusBarView is gone; observe the status bar window root
 		// instead so double-tap-to-sleep keeps working on scene builds. The legacy
 		// hook below stays for older builds (no-op when the class was not found).
-		mStatusBarWindowViewCapture = new AtomicReference<>(null);
 		StatusBarWindowViewClass
 				.afterConstruction()
 				.run(param -> mStatusBarWindowViewCapture.set(param.thisObject));
