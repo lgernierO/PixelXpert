@@ -11,6 +11,7 @@ import android.graphics.Rect;
 import android.os.SystemClock;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
+import android.view.View;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -47,6 +48,7 @@ public class StatusbarGestures extends XposedModPack {
 	private MotionEvent mDownEvent;
 	private GestureDetector mSingleTapDetector;
 	private long mLastScrollTopTime = 0L;
+	private View mStatusBarWindowView = null;
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
 	private Object ShadeInteractorSceneContainerImpl;
@@ -79,7 +81,11 @@ public class StatusbarGestures extends XposedModPack {
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationPanelViewController"); //Pre 17QPR1
-		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		// CANARY scene builds removed PhoneStatusBarView entirely (verified against
+		// the device's SystemUI dex). The status bar window root however keeps its
+		// AOSP name, so we observe the touch stream there instead.
+		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass StatusBarWindowViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.window.StatusBarWindowView");
 
 		//17QPR1
 		ReflectedClass ShadeInteractorSceneContainerImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
@@ -117,6 +123,26 @@ public class StatusbarGestures extends XposedModPack {
 			}
 		});
 
+		// Capture the status bar window root. Every status bar touch - no matter
+		// which child consumes it - passes through its dispatchTouchEvent, so this
+		// is the closest equivalent to MIUI's status-bar tap entry point.
+		StatusBarWindowViewClass
+				.afterConstruction()
+				.run(param -> mStatusBarWindowView = (View) param.thisObject);
+
+		if (StatusBarWindowViewClass.getClazz() != null) {
+			ReflectedClass.of(View.class)
+					.before("dispatchTouchEvent")
+					.run(param -> {
+						if (mStatusBarWindowView == null || param.thisObject != mStatusBarWindowView) return;
+						if (!StatusbarTapScrollTop) return;
+
+						MotionEvent event = (MotionEvent) param.args[0];
+						mSingleTapDetector.onTouchEvent(event);
+					});
+		}
+
+		// Legacy builds: keep observing the PhoneStatusBarView stream directly.
 		PhoneStatusBarViewClass
 				.after("onTouchEvent")
 				.run(param -> {
