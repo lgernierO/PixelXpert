@@ -6,13 +6,10 @@ import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Rect;
-import android.hardware.input.InputManager;
 import android.os.SystemClock;
 import android.view.GestureDetector;
-import android.view.InputDevice;
-import android.view.KeyCharacterMap;
-import android.view.KeyEvent;
 import android.view.MotionEvent;
 
 import androidx.annotation.NonNull;
@@ -182,16 +179,16 @@ public class StatusbarGestures extends XposedModPack {
 
 	/** Debounce window guarding against duplicated touch delivery. */
 	private static final long SCROLL_TOP_DEBOUNCE_MS = 400L;
-	/** InputManager.INJECT_INPUT_EVENT_MODE_ASYNC */
-	private static final int INJECT_INPUT_EVENT_MODE_ASYNC = 0;
 
 	/**
 	 * Chinese-ROM style "tap the status bar to jump back to the top of the
-	 * current app".  SystemUI has no handle on the foreground app's scrolling
-	 * views, so the tap is translated into a MOVE_HOME key event which the
-	 * standard scrollable widgets (ScrollView, RecyclerView, WebView, ...)
-	 * already honor.  Requires the INJECT_EVENTS permission SystemUI already
-	 * holds.
+	 * current app".
+	 * <p>
+	 * SystemUI cannot reliably inject input events here: InputManager's
+	 * injectInputEvent is blocked/greylisted for reflection on modern builds.
+	 * This is what OEM ROMs solve inside services.jar instead - so the
+	 * confirmed tap is forwarded to the system_server-side PixelXpert hooks
+	 * (AndroidModPack) which inject the key from inside the input pipeline.
 	 */
 	private void scrollForegroundAppToTop() {
 		long now = SystemClock.uptimeMillis();
@@ -200,25 +197,10 @@ public class StatusbarGestures extends XposedModPack {
 
 		new Thread(() -> {
 			try {
-				injectKey(KeyEvent.KEYCODE_MOVE_HOME);
+				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP)
+						.addFlags(Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND));
 			} catch (Throwable ignored) {}
 		}).start();
-	}
-
-	private void injectKey(int keyCode) {
-		InputManager inputManager = mContext.getSystemService(InputManager.class);
-		if (inputManager == null) return;
-
-		long now = SystemClock.uptimeMillis();
-		KeyEvent down = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0,
-				KeyEvent.META_CTRL_ON, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-				KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
-		KeyEvent up = new KeyEvent(now, now, KeyEvent.ACTION_UP, keyCode, 0,
-				KeyEvent.META_CTRL_ON, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-				KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
-
-		callMethod(inputManager, "injectInputEvent", down, INJECT_INPUT_EVENT_MODE_ASYNC);
-		callMethod(inputManager, "injectInputEvent", up, INJECT_INPUT_EVENT_MODE_ASYNC);
 	}
 
 	//speedfactor & heightfactor are based on display height
