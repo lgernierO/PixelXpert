@@ -19,6 +19,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.GestureDetector;
+import java.util.concurrent.atomic.AtomicReference;
 import android.view.MotionEvent;
 
 import androidx.annotation.NonNull;
@@ -99,12 +100,18 @@ public class ScreenGestures extends XposedModPack {
 			}
 		});
 
-		ReflectedClass NotificationShadeWindowViewControllerClass = ReflectedClass.of("com.android.systemui.shade.NotificationShadeWindowViewController");
-		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.of("com.android.systemui.shade.NotificationPanelViewController");
+		// ofIfPossible: these legacy classes are absent on CANARY scene builds;
+		// ReflectedClass.of() would throw and kill every gesture in this module.
+		ReflectedClass NotificationShadeWindowViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationShadeWindowViewController");
+		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationPanelViewController");
 		ReflectedClass DozeTriggersClass = ReflectedClass.of("com.android.systemui.doze.DozeTriggers");
-		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 		ReflectedClass TriggerSensorClass = ReflectedClass.of("com.android.systemui.doze.DozeSensors$TriggerSensor");
-		ReflectedClass DefaultSettingsPopupMenuSectionClass = ReflectedClass.of("com.android.systemui.keyguard.ui.view.layout.sections.DefaultSettingsPopupMenuSection");
+		ReflectedClass DefaultSettingsPopupMenuSectionClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.view.layout.sections.DefaultSettingsPopupMenuSection");
+
+		// Status bar window root - exists on every build including CANARY scene.
+		// The double-tap-to-sleep detector is fed from its dispatchTouchEvent.
+		ReflectedClass StatusBarWindowViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.window.StatusBarWindowView");
 
 
 		//A17QPR1 Scene implementation
