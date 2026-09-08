@@ -62,7 +62,11 @@ public class ScrollTopInjector extends XposedModPack {
 		};
 
 		IntentFilter filter = new IntentFilter(Constants.ACTION_SCROLL_TOP);
-		mContext.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+		// Signature|privileged gate: SystemUI holds STATUS_BAR_SERVICE, so only
+		// the trusted status-bar sender can trigger a MOVE_HOME injection.
+		mContext.registerReceiver(receiver, filter,
+				"android.permission.STATUS_BAR_SERVICE", null,
+				Context.RECEIVER_EXPORTED);
 	}
 
 	/**
