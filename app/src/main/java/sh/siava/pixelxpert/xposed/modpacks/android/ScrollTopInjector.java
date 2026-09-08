@@ -17,12 +17,16 @@ import sh.siava.pixelxpert.xposed.annotations.FrameworkModPack;
 import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 
 /**
- * Runs inside system_server (services.jar scope).  Receives the tap-to-top
- * request from the SystemUI side and injects MOVE_HOME through the real
- * InputManagerService instance - the same privileged path OEM ROMs use,
- * bypassing hidden-API restrictions on the client InputManager wrapper.
+ * Runs inside system_server (services.jar scope).  Fallback path for the
+ * status-bar tap-to-top feature: receives the request broadcast from the
+ * SystemUI side and injects MOVE_HOME through the real InputManagerService
+ * instance.
  * <p>
- * All signatures verified against the device's actual services.jar:
+ * The primary path is StatusbarGestures calling the native
+ * WindowManagerService.dispatchScrollToTop() directly (same pipeline MIUI
+ * uses); this injector only fires when that call fails.
+ * <p>
+ * Signature verified against the device's actual services.jar:
  * InputManagerService has a public injectInputEvent(InputEvent, int) method.
  */
 @SuppressWarnings("RedundantThrows")
