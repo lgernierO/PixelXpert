@@ -70,6 +70,7 @@ public class ScreenGestures extends XposedModPack {
 	private Object mKeyguardInteractor;
 	private Object mShadeInteractorSceneContainerImpl;
 	private long mLastKGSingleTap = 0;
+	private final AtomicReference<Object> mStatusBarWindowViewCapture = new AtomicReference<>(null);
 
 	public ScreenGestures(Context context) {
 		super(context);
