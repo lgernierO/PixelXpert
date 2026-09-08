@@ -19,6 +19,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.view.GestureDetector;
+import android.view.View;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReference;
 import android.view.MotionEvent;
 
@@ -189,6 +191,28 @@ public class ScreenGestures extends XposedModPack {
 						turnOffTTT();
 					}
 				});
+
+		// CANARY: PhoneStatusBarView is gone; observe the status bar window root
+		// instead so double-tap-to-sleep keeps working on scene builds. The legacy
+		// hook below stays for older builds (no-op when the class was not found).
+		mStatusBarWindowViewCapture = new AtomicReference<>(null);
+		StatusBarWindowViewClass
+				.afterConstruction()
+				.run(param -> mStatusBarWindowViewCapture.set(param.thisObject));
+
+		if (StatusBarWindowViewClass.getClazz() != null) {
+			ReflectedClass.of(View.class)
+					.before("dispatchTouchEvent")
+					.run(param -> {
+						if (param.thisObject != mStatusBarWindowViewCapture.get()) return;
+						if (!doubleTapToSleepStatusbarEnabled) return;
+
+						//double tap to sleep, statusbar only
+						if (statusBarDoubleTapAllowed()) {
+							mLockscreenDoubleTapToSleep.onTouchEvent((MotionEvent) param.args[0]);
+						}
+					});
+		}
 
 		PhoneStatusBarViewClass
 				.before("onTouchEvent")
