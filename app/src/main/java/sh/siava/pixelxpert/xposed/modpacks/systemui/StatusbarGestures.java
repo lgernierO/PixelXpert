@@ -197,8 +197,7 @@ public class StatusbarGestures extends XposedModPack {
 
 		new Thread(() -> {
 			try {
-				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP)
-						.addFlags(Intent.FLAG_RECEIVER_INCLUDE_BACKGROUND));
+				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP));
 			} catch (Throwable ignored) {}
 		}).start();
 	}
