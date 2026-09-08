@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.graphics.Rect;
 import android.os.SystemClock;
 import android.view.GestureDetector;
+import android.view.Display;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -238,7 +239,7 @@ public class StatusbarGestures extends XposedModPack {
 					.invoke(null);
 			windowManagerService.getClass()
 					.getMethod("dispatchScrollToTop", int.class, int.class, int.class)
-					.invoke(windowManagerService, mContext.getDisplayId(), -1, Math.round(x));
+					.invoke(windowManagerService, Display.DEFAULT_DISPLAY, -1, Math.round(x));
 			return;
 		} catch (Throwable ignored) {}
 
