@@ -39,11 +39,6 @@ public class StatusbarGestures extends XposedModPack {
 	 */
 	private static final int STATUSBAR_MODE_SHADE_LOCKED = 2;
 
-	/** Ignore repeated triggers coming from duplicated touch delivery. */
-	private static final long SCROLL_TOP_DEBOUNCE_MS = 400L;
-	/** InputManager.INJECT_INPUT_EVENT_MODE_ASYNC */
-	private static final int INJECT_INPUT_EVENT_MODE_ASYNC = 0;
-
 	private static int pullDownSide = PULLDOWN_SIDE_RIGHT;
 	private static boolean oneFingerPulldownEnabled = false;
 	private boolean oneFingerPullupEnabled = false;
@@ -51,14 +46,13 @@ public class StatusbarGestures extends XposedModPack {
 	private Object NotificationPanelViewController;
 	GestureDetector mGestureDetector;
 	private boolean StatusbarLongpressAppSwitch = false;
-	private static boolean statusbarTapScrollTopEnabled = false;
+	private static boolean StatusbarTapScrollTop = false;
 	private MotionEvent mDownEvent;
-	private GestureDetector mTapToTopDetector;
+	private GestureDetector mSingleTapDetector;
 	private long mLastScrollTopTime = 0L;
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
 	private Object ShadeInteractorSceneContainerImpl;
-	private Object mStatusBarStateController;
 
 	public StatusbarGestures(Context context) {
 		super(context);
@@ -74,7 +68,7 @@ public class StatusbarGestures extends XposedModPack {
 		pullDownSide = Integer.parseInt(Xprefs.getString("QSPulldownSide", "1"));
 
 		StatusbarLongpressAppSwitch = Xprefs.getBoolean("StatusbarLongpressAppSwitch", false);
-		statusbarTapScrollTopEnabled = Xprefs.getBoolean("StatusbarTapScrollTop", false);
+		StatusbarTapScrollTop = Xprefs.getBoolean("StatusbarTapScrollTop", false);
 	}
 
 	public static void collapseQSPanel()
@@ -88,7 +82,7 @@ public class StatusbarGestures extends XposedModPack {
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationPanelViewController"); //Pre 17QPR1
-		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 
 		//17QPR1
 		ReflectedClass ShadeInteractorSceneContainerImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
@@ -110,110 +104,38 @@ public class StatusbarGestures extends XposedModPack {
 				.afterConstruction()
 				.run(param -> ShadeInteractorSceneContainerImpl = param.thisObject);
 
-		// Strict shade-state gating for the tap observer below.  The legacy
-		// isStatusbarClosed() shortcut is meaningless here: on CANARY the
-		// ShadeInteractor exists from startup on, and WindowRootView receives
-		// touches for the whole shade once it is expanded.
-		ReflectedClass StatusBarStateControllerClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.statusbar.StatusBarStateControllerImpl");
-		StatusBarStateControllerClass
-				.afterConstruction()
-				.run(param -> mStatusBarStateController = param.thisObject);
-
-		// CANARY 37 carries a Compose-based status bar.  Its View counterpart
-		// (PhoneStatusBarView + createClickListener) is dead code there: decompiled
-		// onTouchEvent only checks mTouchableRegion and logs "No touch handler
-		// provided".  The gesture handlers live in
-		// StatusBarRootKt$...$3$2$1 (pointerInput { detectLongPressGesture }).
-		// Every Compose gesture still arrives as View-level events through the
-		// scene container root, so the stream is observed at
-		// WindowRootView.dispatchTouchEvent instead - read-only, nothing is
-		// intercepted, so the built-in long-press stays fully functional.
-		ReflectedClass WindowRootViewClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.scene.ui.view.WindowRootView");
-		final boolean hasWindowRootView = WindowRootViewClass.getClazz() != null;
-
 		mGestureDetector = new GestureDetector(mContext, getPullDownLPListener());
 
-		// Separate detector: the pulldown listener must not see its stream altered,
-		// and tap-to-top needs double-tap arbitration of its own.
-		mTapToTopDetector = new GestureDetector(mContext, new GestureListener());
-		mTapToTopDetector.setOnDoubleTapListener(getTapToTopListener());
-
-		if (hasWindowRootView) {
-			// WindowRootView does NOT declare dispatchTouchEvent - it inherits the
-			// ViewGroup implementation, so the method hook lives on
-			// ViewGroup.dispatchTouchEvent with an instanceof filter.  Read-only:
-			// nothing is intercepted, the Compose long-press keeps working.
-			// While the shade is collapsed the scene container window is only
-			// status-bar tall; once expanded, the strict state gate below filters.
-			ReflectedClass ViewGroupClass = ReflectedClass.of(android.view.ViewGroup.class);
-
-			ViewGroupClass
-					.before("dispatchTouchEvent")
-					.run(param -> {
-						if (!(param.thisObject.getClass().getName().equals(
-								"com.android.systemui.scene.ui.view.WindowRootView"))) {
-							return;
-						}
-
-						MotionEvent event = param.getArg(0);
-						if (event == null) return;
-
-						if (statusbarTapScrollTopEnabled) {
-							mTapToTopDetector.onTouchEvent(event);
-						}
-
-						if (!oneFingerPulldownEnabled) return;
-
-						mGestureDetector.onTouchEvent(event);
-					});
-		}
-
-		if (!hasWindowRootView) {
-			// Legacy builds: the view-level listener is the real path there.
-			ReflectedClass StatusBarClickListenerClass = ReflectedClass.ofIfPossible(
-					"com.android.systemui.statusbar.phone.PhoneStatusBarViewController$createClickListener$1");
-			final boolean hasClickListener = StatusBarClickListenerClass.getClazz() != null;
-
-			if (hasClickListener) {
-				StatusBarClickListenerClass
-						.after("onTouch")
-						.run(param -> {
-							MotionEvent event = param.getArg(1);
-							if (event == null) return;
-
-							if (statusbarTapScrollTopEnabled) {
-								mTapToTopDetector.onTouchEvent(event);
-							}
-
-							if (!oneFingerPulldownEnabled) return;
-
-							mGestureDetector.onTouchEvent(event);
-						});
+		// Tap-to-top detector: mirrors the proven double-tap-to-sleep setup in
+		// ScreenGestures - same hook point (PhoneStatusBarView.onTouchEvent),
+		// same "before" timing, same event extraction.  A separate detector
+		// instance keeps this stream untouched for the other features.
+		mSingleTapDetector = new GestureDetector(mContext, new GestureDetector.SimpleOnGestureListener() {
+			@Override
+			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
+				if (StatusbarTapScrollTop) {
+					scrollForegroundAppToTop();
+				}
+				return false;
 			}
+		});
 
-			// Last resort for very old builds that still route touches through
-			// the view itself.
-			PhoneStatusBarViewClass
-					.after("onTouchEvent")
-					.run(param -> {
-						if (hasClickListener) return;
+		PhoneStatusBarViewClass
+				.after("onTouchEvent")
+				.run(param -> {
+					MotionEvent event =
+							param.args[0] instanceof MotionEvent
+									? (MotionEvent) param.args[0]
+									: (MotionEvent) param.args[1];
 
-						MotionEvent event =
-								param.args[0] instanceof MotionEvent
-										? (MotionEvent) param.args[0]
-										: (MotionEvent) param.args[1];
+					if (StatusbarTapScrollTop) {
+						mSingleTapDetector.onTouchEvent(event);
+					}
 
-						if (statusbarTapScrollTopEnabled) {
-							mTapToTopDetector.onTouchEvent(event);
-						}
+					if (!oneFingerPulldownEnabled) return;
 
-						if (!oneFingerPulldownEnabled) return;
-
-						mGestureDetector.onTouchEvent(event);
-					});
-		}
+					mGestureDetector.onTouchEvent(event);
+				});
 
 		GestureDetector pullUpDetector = new GestureDetector(mContext, getPullUpListener());
 
@@ -250,6 +172,7 @@ public class StatusbarGestures extends XposedModPack {
 							});
 				});
 	}
+
 	private void onStatusBarLongPress(HookHelper.RunParam param) {
 		if (StatusbarLongpressAppSwitch) {
 			sendAppSwitchBroadcast();
@@ -257,76 +180,21 @@ public class StatusbarGestures extends XposedModPack {
 		}
 	}
 
+	/** Debounce window guarding against duplicated touch delivery. */
+	private static final long SCROLL_TOP_DEBOUNCE_MS = 400L;
+	/** InputManager.INJECT_INPUT_EVENT_MODE_ASYNC */
+	private static final int INJECT_INPUT_EVENT_MODE_ASYNC = 0;
+
 	/**
 	 * Chinese-ROM style "tap the status bar to jump back to the top of the
-	 * current app".  SystemUI has no reference to the foreground app's scrolling
-	 * views, so the tap is translated into a MOVE_HOME key event that scrollable
-	 * widgets (ScrollView, RecyclerView, ListView, WebView, ...) already honor.
-	 * <p>
-	 * The detection deliberately runs through {@code onSingleTapConfirmed} so it
-	 * cannot race the double-tap-to-sleep gesture in {@link ScreenGestures},
-	 * which hooks the very same {@code PhoneStatusBarView.onTouchEvent}: a
-	 * confirmed single tap is only reported once the double-tap window elapsed.
+	 * current app".  SystemUI has no handle on the foreground app's scrolling
+	 * views, so the tap is translated into a MOVE_HOME key event which the
+	 * standard scrollable widgets (ScrollView, RecyclerView, WebView, ...)
+	 * already honor.  Requires the INJECT_EVENTS permission SystemUI already
+	 * holds.
 	 */
-	private GestureDetector.OnDoubleTapListener getTapToTopListener() {
-		return new GestureDetector.OnDoubleTapListener() {
-			@Override
-			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
-				if (!statusbarTapScrollTopEnabled) return false;
-				// Strict gate: shade must be the collapsed status bar only.  The
-				// legacy isStatusbarClosed() is always true on CANARY because the
-				// ShadeInteractor is constructed at startup, and it would make
-				// taps inside the expanded shade trigger the scroll.
-				if (!isHomeScreenShadeCollapsed()) return false;
-
-				scrollForegroundAppToTop();
-				return false;
-			}
-
-			@Override
-			public boolean onDoubleTap(@NonNull MotionEvent e) {
-				return false;
-			}
-
-			@Override
-			public boolean onDoubleTapEvent(@NonNull MotionEvent e) {
-				return false;
-			}
-		};
-	}
-
-	/**
-	 * True only while the notification shade is fully collapsed and the device
-	 * is in the normal SHADE state (not keyguard, not dozing).  Used to make
-	 * sure a tap belongs to the status bar strip on top of an app instead of a
-	 * shade/lockscreen surface.
-	 */
-	@SuppressWarnings("ConstantValue")
-	private boolean isHomeScreenShadeCollapsed() {
-		// Preferred: the scene-based interactor exposes a synchronous expansion
-		// fraction; 0f means the status bar strip only.  This is the same source
-		// the Compose status bar itself uses.
-		if (ShadeInteractorSceneContainerImpl != null) {
-			try {
-				return (float) callMethod(ShadeInteractorSceneContainerImpl, "getShadeExpansion") == 0f;
-			} catch (Throwable ignored) {}
-		}
-
-		// Fallback for legacy builds: NPVC exposes the same information.
-		if (NotificationPanelViewController != null) {
-			try {
-				return (int) callMethod(mStatusBarStateController, "getState") == STATUSBAR_MODE_SHADE
-						&& (boolean) callMethod(NotificationPanelViewController, "isFullyCollapsed");
-			} catch (Throwable ignored) {}
-		}
-
-		return false;
-	}
-
 	private void scrollForegroundAppToTop() {
 		long now = SystemClock.uptimeMillis();
-		// Guard against the double delivery that happens when both the view and
-		// its controller forward the same gesture.
 		if (now - mLastScrollTopTime < SCROLL_TOP_DEBOUNCE_MS) return;
 		mLastScrollTopTime = now;
 
@@ -342,7 +210,6 @@ public class StatusbarGestures extends XposedModPack {
 		if (inputManager == null) return;
 
 		long now = SystemClock.uptimeMillis();
-
 		KeyEvent down = new KeyEvent(now, now, KeyEvent.ACTION_DOWN, keyCode, 0,
 				KeyEvent.META_CTRL_ON, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
 				KeyEvent.FLAG_FROM_SYSTEM, InputDevice.SOURCE_KEYBOARD);
@@ -353,7 +220,6 @@ public class StatusbarGestures extends XposedModPack {
 		callMethod(inputManager, "injectInputEvent", down, INJECT_INPUT_EVENT_MODE_ASYNC);
 		callMethod(inputManager, "injectInputEvent", up, INJECT_INPUT_EVENT_MODE_ASYNC);
 	}
-
 
 	//speedfactor & heightfactor are based on display height
 	private boolean isValidFling(MotionEvent e1, MotionEvent e2, float velocityY, float speedFactor, float heightFactor) {
