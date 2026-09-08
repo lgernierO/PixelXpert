@@ -58,6 +58,7 @@ public class StatusbarGestures extends XposedModPack {
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
 	private Object ShadeInteractorSceneContainerImpl;
+	private Object mStatusBarStateController;
 
 	public StatusbarGestures(Context context) {
 		super(context);
@@ -87,7 +88,7 @@ public class StatusbarGestures extends XposedModPack {
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationPanelViewController"); //Pre 17QPR1
-		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 
 		//17QPR1
 		ReflectedClass ShadeInteractorSceneContainerImplClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.domain.interactor.ShadeInteractorSceneContainerImpl");
@@ -109,6 +110,29 @@ public class StatusbarGestures extends XposedModPack {
 				.afterConstruction()
 				.run(param -> ShadeInteractorSceneContainerImpl = param.thisObject);
 
+		// Strict shade-state gating for the tap observer below.  The legacy
+		// isStatusbarClosed() shortcut is meaningless here: on CANARY the
+		// ShadeInteractor exists from startup on, and WindowRootView receives
+		// touches for the whole shade once it is expanded.
+		ReflectedClass StatusBarStateControllerClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.statusbar.StatusBarStateControllerImpl");
+		StatusBarStateControllerClass
+				.afterConstruction()
+				.run(param -> mStatusBarStateController = param.thisObject);
+
+		// CANARY 37 carries a Compose-based status bar.  Its View counterpart
+		// (PhoneStatusBarView + createClickListener) is dead code there: decompiled
+		// onTouchEvent only checks mTouchableRegion and logs "No touch handler
+		// provided".  The gesture handlers live in
+		// StatusBarRootKt$...$3$2$1 (pointerInput { detectLongPressGesture }).
+		// Every Compose gesture still arrives as View-level events through the
+		// scene container root, so the stream is observed at
+		// WindowRootView.dispatchTouchEvent instead - read-only, nothing is
+		// intercepted, so the built-in long-press stays fully functional.
+		ReflectedClass WindowRootViewClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.scene.ui.view.WindowRootView");
+		final boolean hasWindowRootView = WindowRootViewClass.getClazz() != null;
+
 		mGestureDetector = new GestureDetector(mContext, getPullDownLPListener());
 
 		// Separate detector: the pulldown listener must not see its stream altered,
@@ -116,51 +140,80 @@ public class StatusbarGestures extends XposedModPack {
 		mTapToTopDetector = new GestureDetector(mContext, new GestureListener());
 		mTapToTopDetector.setOnDoubleTapListener(getTapToTopListener());
 
-		// PhoneStatusBarView.onTouchEvent is a dead end on this build: it only
-		// verifies the touchable region and then logs "No touch handler provided;
-		// eating gesture".  Real gestures arrive at the OnTouchListener that
-		// PhoneStatusBarViewController.createClickListener() installs on the view,
-		// so the touch stream has to be observed there.
-		ReflectedClass StatusBarClickListenerClass = ReflectedClass.ofIfPossible(
-				"com.android.systemui.statusbar.phone.PhoneStatusBarViewController$createClickListener$1");
-		// ofIfPossible() always returns a wrapper, so the class itself has to be
-		// inspected to know whether the hook target really exists.
-		final boolean hasClickListener = StatusBarClickListenerClass.getClazz() != null;
+		if (hasWindowRootView) {
+			// WindowRootView does NOT declare dispatchTouchEvent - it inherits the
+			// ViewGroup implementation, so the method hook lives on
+			// ViewGroup.dispatchTouchEvent with an instanceof filter.  Read-only:
+			// nothing is intercepted, the Compose long-press keeps working.
+			// While the shade is collapsed the scene container window is only
+			// status-bar tall; once expanded, the strict state gate below filters.
+			ReflectedClass ViewGroupClass = ReflectedClass.of(android.view.ViewGroup.class);
 
-		StatusBarClickListenerClass
-				.after("onTouch")
-				.run(param -> {
-					MotionEvent event = param.getArg(1);
-					if (event == null) return;
+			ViewGroupClass
+					.before("dispatchTouchEvent")
+					.run(param -> {
+						if (!(param.thisObject.getClass().getName().equals(
+								"com.android.systemui.scene.ui.view.WindowRootView"))) {
+							return;
+						}
 
-					if (statusbarTapScrollTopEnabled) {
-						mTapToTopDetector.onTouchEvent(event);
-					}
+						MotionEvent event = param.getArg(0);
+						if (event == null) return;
 
-					if (!oneFingerPulldownEnabled) return;
+						if (statusbarTapScrollTopEnabled) {
+							mTapToTopDetector.onTouchEvent(event);
+						}
 
-					mGestureDetector.onTouchEvent(event);
-				});
+						if (!oneFingerPulldownEnabled) return;
 
-		// Legacy fallback for builds that still route touches through the view.
-		PhoneStatusBarViewClass
-				.after("onTouchEvent")
-				.run(param -> {
-					if (hasClickListener) return;
+						mGestureDetector.onTouchEvent(event);
+					});
+		}
 
-					MotionEvent event =
-							param.args[0] instanceof MotionEvent
-									? (MotionEvent) param.args[0]
-									: (MotionEvent) param.args[1];
+		if (!hasWindowRootView) {
+			// Legacy builds: the view-level listener is the real path there.
+			ReflectedClass StatusBarClickListenerClass = ReflectedClass.ofIfPossible(
+					"com.android.systemui.statusbar.phone.PhoneStatusBarViewController$createClickListener$1");
+			final boolean hasClickListener = StatusBarClickListenerClass.getClazz() != null;
 
-					if (statusbarTapScrollTopEnabled) {
-						mTapToTopDetector.onTouchEvent(event);
-					}
+			if (hasClickListener) {
+				StatusBarClickListenerClass
+						.after("onTouch")
+						.run(param -> {
+							MotionEvent event = param.getArg(1);
+							if (event == null) return;
 
-					if (!oneFingerPulldownEnabled) return;
+							if (statusbarTapScrollTopEnabled) {
+								mTapToTopDetector.onTouchEvent(event);
+							}
 
-					mGestureDetector.onTouchEvent(event);
-				});
+							if (!oneFingerPulldownEnabled) return;
+
+							mGestureDetector.onTouchEvent(event);
+						});
+			}
+
+			// Last resort for very old builds that still route touches through
+			// the view itself.
+			PhoneStatusBarViewClass
+					.after("onTouchEvent")
+					.run(param -> {
+						if (hasClickListener) return;
+
+						MotionEvent event =
+								param.args[0] instanceof MotionEvent
+										? (MotionEvent) param.args[0]
+										: (MotionEvent) param.args[1];
+
+						if (statusbarTapScrollTopEnabled) {
+							mTapToTopDetector.onTouchEvent(event);
+						}
+
+						if (!oneFingerPulldownEnabled) return;
+
+						mGestureDetector.onTouchEvent(event);
+					});
+		}
 
 		GestureDetector pullUpDetector = new GestureDetector(mContext, getPullUpListener());
 
@@ -220,8 +273,11 @@ public class StatusbarGestures extends XposedModPack {
 			@Override
 			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
 				if (!statusbarTapScrollTopEnabled) return false;
-				// A tap while the shade is open belongs to the shade, not the app.
-				if (!isStatusbarClosed()) return false;
+				// Strict gate: shade must be the collapsed status bar only.  The
+				// legacy isStatusbarClosed() is always true on CANARY because the
+				// ShadeInteractor is constructed at startup, and it would make
+				// taps inside the expanded shade trigger the scroll.
+				if (!isHomeScreenShadeCollapsed()) return false;
 
 				scrollForegroundAppToTop();
 				return false;
@@ -237,6 +293,34 @@ public class StatusbarGestures extends XposedModPack {
 				return false;
 			}
 		};
+	}
+
+	/**
+	 * True only while the notification shade is fully collapsed and the device
+	 * is in the normal SHADE state (not keyguard, not dozing).  Used to make
+	 * sure a tap belongs to the status bar strip on top of an app instead of a
+	 * shade/lockscreen surface.
+	 */
+	@SuppressWarnings("ConstantValue")
+	private boolean isHomeScreenShadeCollapsed() {
+		// Preferred: the scene-based interactor exposes a synchronous expansion
+		// fraction; 0f means the status bar strip only.  This is the same source
+		// the Compose status bar itself uses.
+		if (ShadeInteractorSceneContainerImpl != null) {
+			try {
+				return (float) callMethod(ShadeInteractorSceneContainerImpl, "getShadeExpansion") == 0f;
+			} catch (Throwable ignored) {}
+		}
+
+		// Fallback for legacy builds: NPVC exposes the same information.
+		if (NotificationPanelViewController != null) {
+			try {
+				return (int) callMethod(mStatusBarStateController, "getState") == STATUSBAR_MODE_SHADE
+						&& (boolean) callMethod(NotificationPanelViewController, "isFullyCollapsed");
+			} catch (Throwable ignored) {}
+		}
+
+		return false;
 	}
 
 	private void scrollForegroundAppToTop() {

@@ -102,7 +102,10 @@ public class ScreenGestures extends XposedModPack {
 		ReflectedClass NotificationShadeWindowViewControllerClass = ReflectedClass.of("com.android.systemui.shade.NotificationShadeWindowViewController");
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.of("com.android.systemui.shade.NotificationPanelViewController");
 		ReflectedClass DozeTriggersClass = ReflectedClass.of("com.android.systemui.doze.DozeTriggers");
-		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
+		ReflectedClass WindowRootViewClass = ReflectedClass.ofIfPossible(
+				"com.android.systemui.scene.ui.view.WindowRootView");
+		final boolean hasWindowRootView = WindowRootViewClass.getClazz() != null;
 		ReflectedClass StatusBarClickListenerClass = ReflectedClass.ofIfPossible(
 				"com.android.systemui.statusbar.phone.PhoneStatusBarViewController$createClickListener$1");
 		final boolean hasClickListener = StatusBarClickListenerClass.getClazz() != null;
@@ -185,8 +188,28 @@ public class ScreenGestures extends XposedModPack {
 						turnOffTTT();
 					}
 				});
+		// Scene/Compose SystemUI (WindowRootView present) delivers status-bar
+		// touches through the scene container root; the view-level click listener
+		// is dead code there (the class exists but is never instantiated).
+		if (hasWindowRootView) {
+			ReflectedClass ViewGroupClass = ReflectedClass.of(android.view.ViewGroup.class);
 
-		if (hasClickListener) {
+			ViewGroupClass
+					.before("dispatchTouchEvent")
+					.run(param -> {
+						if (!(param.thisObject.getClass().getName().equals(
+								"com.android.systemui.scene.ui.view.WindowRootView"))) {
+							return;
+						}
+
+						if (!doubleTapToSleepStatusbarEnabled) return;
+
+						//double tap to sleep, statusbar only
+						if (statusBarDoubleTapAllowed()) {
+							mLockscreenDoubleTapToSleep.onTouchEvent(param.getArg(0));
+						}
+					});
+		} else if (hasClickListener) {
 			StatusBarClickListenerClass
 					.before("onTouch")
 					.run(param -> {
