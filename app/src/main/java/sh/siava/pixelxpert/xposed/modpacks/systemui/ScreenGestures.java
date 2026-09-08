@@ -21,7 +21,6 @@ import android.os.SystemClock;
 import android.view.GestureDetector;
 import android.view.View;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicReference;
 import android.view.MotionEvent;
 
 import androidx.annotation.NonNull;
