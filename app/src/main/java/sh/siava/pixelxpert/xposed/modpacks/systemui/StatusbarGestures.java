@@ -13,6 +13,7 @@ import android.view.GestureDetector;
 import android.view.Display;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -48,6 +49,8 @@ public class StatusbarGestures extends XposedModPack {
 	private static boolean StatusbarTapScrollTop = false;
 	private MotionEvent mDownEvent;
 	private GestureDetector mSingleTapDetector;
+	/** True once the status-bar window root has delivered this touch sequence. */
+	private boolean mStatusBarEventSeen = false;
 	private long mLastScrollTopTime = 0L;
 	private View mStatusBarWindowView = null;
 	@SuppressLint("StaticFieldLeak")
@@ -113,9 +116,8 @@ public class StatusbarGestures extends XposedModPack {
 		mGestureDetector = new GestureDetector(mContext, getPullDownLPListener());
 
 		// Tap-to-top detector: mirrors the proven double-tap-to-sleep setup in
-		// ScreenGestures - same hook point (PhoneStatusBarView.onTouchEvent),
-		// same "before" timing, same event extraction.  A separate detector
-		// instance keeps this stream untouched for the other features.
+		// ScreenGestures - same event extraction, separate detector instance so
+		// this stream stays untouched by the other status-bar gestures.
 		mSingleTapDetector = new GestureDetector(mContext, new GestureDetector.SimpleOnGestureListener() {
 			@Override
 			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
@@ -133,19 +135,30 @@ public class StatusbarGestures extends XposedModPack {
 				.afterConstruction()
 				.run(param -> mStatusBarWindowView = (View) param.thisObject);
 
+		// CANARY's StatusBarWindowView does not declare dispatchTouchEvent (verified
+		// in the device dex), so the code that actually runs for it is
+		// ViewGroup.dispatchTouchEvent. Hooking View.dispatchTouchEvent can never
+		// fire for it. We hook the ViewGroup implementation and filter to the
+		// status-bar window root only, so every status-bar tap reaches the
+		// detector exactly once, no matter which child consumes the touch.
 		if (StatusBarWindowViewClass.getClazz() != null) {
-			ReflectedClass.of(View.class)
+			ReflectedClass.of(ViewGroup.class)
 					.before("dispatchTouchEvent")
 					.run(param -> {
-						if (mStatusBarWindowView == null || param.thisObject != mStatusBarWindowView) return;
+						if (param.thisObject != mStatusBarWindowView) return;
 						if (!StatusbarTapScrollTop) return;
 
 						MotionEvent event = (MotionEvent) param.args[0];
 						mSingleTapDetector.onTouchEvent(event);
+						mStatusBarEventSeen = true;
 					});
 		}
 
-		// Legacy builds: keep observing the PhoneStatusBarView stream directly.
+		// Legacy builds route status-bar touches through PhoneStatusBarView
+		// (which overrides dispatchTouchEvent and onTouchEvent). When the window
+		// root above already sees the events, this stream stays passive to avoid
+		// double-feeding one physical tap into the detector (which would make
+		// GestureDetector report a double-tap and suppress onSingleTapConfirmed).
 		PhoneStatusBarViewClass
 				.after("onTouchEvent")
 				.run(param -> {
@@ -154,7 +167,7 @@ public class StatusbarGestures extends XposedModPack {
 									? (MotionEvent) param.args[0]
 									: (MotionEvent) param.args[1];
 
-					if (StatusbarTapScrollTop) {
+					if (StatusbarTapScrollTop && !mStatusBarEventSeen) {
 						mSingleTapDetector.onTouchEvent(event);
 					}
 
