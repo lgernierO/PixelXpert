@@ -60,6 +60,7 @@ public class StatusbarGestures extends XposedModPack {
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
 	private Object ShadeInteractorSceneContainerImpl;
+	private Object mKeyguardInteractor;
 
 	public StatusbarGestures(Context context) {
 		super(context);
@@ -118,6 +119,12 @@ public class StatusbarGestures extends XposedModPack {
 				.afterConstruction()
 				.run(param -> ShadeInteractorSceneContainerImpl = param.thisObject);
 
+		// Same capture as ScreenGestures: used to suppress tap-to-top on the
+		// lockscreen / bouncer, where scrolling a foreground app makes no sense.
+		ReflectedClass.ofIfPossible("com.android.systemui.keyguard.domain.interactor.KeyguardInteractor")
+				.afterConstruction()
+				.run(param -> mKeyguardInteractor = param.thisObject);
+
 		mGestureDetector = new GestureDetector(mContext, getPullDownLPListener());
 
 		// Tap-to-top detector: mirrors the proven double-tap-to-sleep setup in
@@ -133,17 +140,38 @@ public class StatusbarGestures extends XposedModPack {
 			}
 		});
 
-		// CANARY verified: the status bar lives inside the shade window.
-		// NotificationShadeWindowView.dispatchTouchEvent (final override) is the
-		// single funnel every status-bar touch passes through, and it decides
-		// itself whether to forward to PhoneStatusBarView. Hooking it directly
-		// guarantees one feed per physical tap - no matter which child consumes
-		// the touch. The shade window covers the whole screen, so taps are
-		// filtered down to the status-bar strip by Y before being fed in.
+		// PRIMARY source, verified on-device: this CANARY build renders the
+		// status bar through the scene container, whose window root view is
+		// SceneWindowRootView. The proven double-tap-to-sleep gesture hooks
+		// exactly this method, so it is the only touch funnel guaranteed to
+		// fire. The window root spans the whole screen, so taps are filtered
+		// down to the status-bar strip by Y, and suppressed while the
+		// keyguard/bouncer shows or any shade surface is expanded.
+		ReflectedClass.ofIfPossible("com.android.systemui.scene.ui.view.SceneWindowRootView")
+				.before("dispatchTouchEvent")
+				.run(param -> {
+					if (!StatusbarTapScrollTop) return;
+					if (!isTapToTopAllowed()) return;
+
+					MotionEvent event = (MotionEvent) param.args[0];
+					if (event.getY() > getStatusBarHeight()) return;
+
+					if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+						mStatusBarEventSeen = false; // new gesture sequence begins
+					}
+					mSingleTapDetector.onTouchEvent(event);
+					mStatusBarEventSeen = true;
+				});
+
+		// SECONDARY source for builds where the bar still lives inside the
+		// legacy shade window. Guarded by mStatusBarEventSeen so a touch that
+		// already passed through the scene root above is not fed twice (a
+		// duplicate UP would be read as a double-tap and suppress the tap).
 		ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationShadeWindowView")
 				.before("dispatchTouchEvent")
 				.run(param -> {
 					if (!StatusbarTapScrollTop) return;
+					if (mStatusBarEventSeen) return; // scene root already fed this sequence
 
 					MotionEvent event = (MotionEvent) param.args[0];
 					if (event.getY() > getStatusBarHeight()) return;
@@ -259,6 +287,31 @@ public class StatusbarGestures extends XposedModPack {
 	 * The real bar height is captured from PhoneStatusBarView once it is
 	 * laid out; until then the framework status bar height resource is used.
 	 */
+	/**
+	 * Tap-to-top only makes sense on an unlocked, collapsed shade - otherwise
+	 * WMS would target the keyguard or the shade itself. Mirrors the gating
+	 * ScreenGestures uses for its status-bar gestures.
+	 */
+	private boolean isTapToTopAllowed() {
+		if (mShadeInteractorAnyExpanded()) return false;
+		if (mKeyguardInteractor == null) return true;
+		try {
+			return callMethod(getObjectField(mKeyguardInteractor, "isKeyguardShowing"), "getValue").equals(false)
+					&& !callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue").equals(true);
+		} catch (Throwable ignored) {
+			return true;
+		}
+	}
+
+	private boolean mShadeInteractorAnyExpanded() {
+		if (ShadeInteractorSceneContainerImpl == null) return false;
+		try {
+			return (boolean) callMethod(callMethod(ShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
+		} catch (Throwable ignored) {
+			return false;
+		}
+	}
+
 	private int getStatusBarHeight() {
 		if (mStatusBarHeight < 0) {
 			if (mStatusBarView != null && mStatusBarView.getHeight() > 0) {
