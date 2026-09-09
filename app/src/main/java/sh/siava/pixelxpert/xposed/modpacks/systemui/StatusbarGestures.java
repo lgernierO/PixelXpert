@@ -51,6 +51,10 @@ public class StatusbarGestures extends XposedModPack {
 	private GestureDetector mSingleTapDetector;
 	/** True once the status-bar window root has delivered this touch sequence. */
 	private boolean mStatusBarEventSeen = false;
+	/** Cached status bar height in px, used to filter shade-window taps down to the bar. */
+	private int mStatusBarHeight = -1;
+	/** The status bar view itself, kept to measure the real strip height. */
+	private View mStatusBarView = null;
 	private long mLastScrollTopTime = 0L;
 	private View mStatusBarWindowView = null;
 	@SuppressLint("StaticFieldLeak")
@@ -85,11 +89,12 @@ public class StatusbarGestures extends XposedModPack {
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationPanelViewController"); //Pre 17QPR1
-		// Verified against the device's CANARY SystemUI dex: PhoneStatusBarView
-		// still exists there, so the legacy touch hook below stays effective.
-		// StatusBarWindowView (the status bar window root) is hooked in addition
-		// because every status bar touch passes through its dispatchTouchEvent,
-		// no matter which child consumes it.
+		// Verified against the device's CANARY SystemUI dex: the status bar now
+		// lives inside the shade window. NotificationShadeWindowView (which
+		// overrides dispatchTouchEvent) is the only funnel every status-bar
+		// touch passes through, and it forwards touches to PhoneStatusBarView
+		// itself. StatusBarWindowView exists but sits OUTSIDE the touch path,
+		// so hooking it never fires.
 		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 		ReflectedClass StatusBarWindowViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.window.StatusBarWindowView");
 
@@ -128,19 +133,36 @@ public class StatusbarGestures extends XposedModPack {
 			}
 		});
 
-		// Capture the status bar window root. Every status bar touch - no matter
-		// which child consumes it - passes through its dispatchTouchEvent, so this
-		// is the closest equivalent to MIUI's status-bar tap entry point.
+		// CANARY verified: the status bar lives inside the shade window.
+		// NotificationShadeWindowView.dispatchTouchEvent (final override) is the
+		// single funnel every status-bar touch passes through, and it decides
+		// itself whether to forward to PhoneStatusBarView. Hooking it directly
+		// guarantees one feed per physical tap - no matter which child consumes
+		// the touch. The shade window covers the whole screen, so taps are
+		// filtered down to the status-bar strip by Y before being fed in.
+		ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationShadeWindowView")
+				.before("dispatchTouchEvent")
+				.run(param -> {
+					if (!StatusbarTapScrollTop) return;
+
+					MotionEvent event = (MotionEvent) param.args[0];
+					if (event.getY() > getStatusBarHeight()) return;
+
+					if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+						mStatusBarEventSeen = false; // new gesture sequence begins
+					}
+					mSingleTapDetector.onTouchEvent(event);
+					mStatusBarEventSeen = true;
+				});
+
+		// StatusBarWindowView is kept as a secondary source for builds where the
+		// bar window still exists outside the shade window. Its own class does
+		// not declare dispatchTouchEvent (CANARY dex), so the ViewGroup hook is
+		// what actually fires for it.
 		StatusBarWindowViewClass
 				.afterConstruction()
 				.run(param -> mStatusBarWindowView = (View) param.thisObject);
 
-		// CANARY's StatusBarWindowView does not declare dispatchTouchEvent (verified
-		// in the device dex), so the code that actually runs for it is
-		// ViewGroup.dispatchTouchEvent. Hooking View.dispatchTouchEvent can never
-		// fire for it. We hook the ViewGroup implementation and filter to the
-		// status-bar window root only, so every status-bar tap reaches the
-		// detector exactly once, no matter which child consumes the touch.
 		if (StatusBarWindowViewClass.getClazz() != null) {
 			ReflectedClass.of(ViewGroup.class)
 					.before("dispatchTouchEvent")
@@ -149,23 +171,32 @@ public class StatusbarGestures extends XposedModPack {
 						if (!StatusbarTapScrollTop) return;
 
 						MotionEvent event = (MotionEvent) param.args[0];
+						if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+							mStatusBarEventSeen = false;
+						}
 						mSingleTapDetector.onTouchEvent(event);
 						mStatusBarEventSeen = true;
 					});
 		}
 
-		// Legacy builds route status-bar touches through PhoneStatusBarView
-		// (which overrides dispatchTouchEvent and onTouchEvent). When the window
-		// root above already sees the events, this stream stays passive to avoid
-		// double-feeding one physical tap into the detector (which would make
-		// GestureDetector report a double-tap and suppress onSingleTapConfirmed).
+		// Capture the real status-bar height from the bar view itself, so the
+		// shade-window Y filter tracks the actual strip on every device.
 		PhoneStatusBarViewClass
-				.after("onTouchEvent")
+				.afterConstruction()
 				.run(param -> {
-					MotionEvent event =
-							param.args[0] instanceof MotionEvent
-									? (MotionEvent) param.args[0]
-									: (MotionEvent) param.args[1];
+					mStatusBarView = (View) param.thisObject;
+					mStatusBarHeight = -1; // re-resolve on first use
+				});
+
+		// Legacy path: when the shade-window funnel above is unavailable (older
+		// builds), PhoneStatusBarView receives the events directly. The
+		// mStatusBarEventSeen guard keeps one physical tap from being fed twice,
+		// which would make the detector report a double-tap and suppress
+		// onSingleTapConfirmed.
+		PhoneStatusBarViewClass
+				.after("dispatchTouchEvent")
+				.run(param -> {
+					MotionEvent event = (MotionEvent) param.args[0];
 
 					if (StatusbarTapScrollTop && !mStatusBarEventSeen) {
 						mSingleTapDetector.onTouchEvent(event);
@@ -221,6 +252,29 @@ public class StatusbarGestures extends XposedModPack {
 
 	/** Debounce window guarding against duplicated touch delivery. */
 	private static final long SCROLL_TOP_DEBOUNCE_MS = 400L;
+
+	/**
+	 * Status-bar strip height in px. The shade window spans the whole screen,
+	 * so the tap-to-top detector only accepts events inside this strip.
+	 * The real bar height is captured from PhoneStatusBarView once it is
+	 * laid out; until then the framework status bar height resource is used.
+	 */
+	private int getStatusBarHeight() {
+		if (mStatusBarHeight < 0) {
+			if (mStatusBarView != null && mStatusBarView.getHeight() > 0) {
+				mStatusBarHeight = mStatusBarView.getHeight();
+				return mStatusBarHeight;
+			}
+			try {
+				int resId = mContext.getResources().getIdentifier("status_bar_height", "dimen", "android");
+				if (resId != 0) {
+					mStatusBarHeight = mContext.getResources().getDimensionPixelSize(resId);
+				}
+			} catch (Throwable ignored) {}
+			if (mStatusBarHeight < 0) mStatusBarHeight = 84; // conservative default (~24dp)
+		}
+		return mStatusBarHeight;
+	}
 
 	/**
 	 * Chinese-ROM style "tap the status bar to jump back to the top of the
