@@ -4,8 +4,15 @@
  * Based on the proven-loadable Zygisk-Loader pattern (C struct ABI
  * registration, no C++ runtime, no templates). Loads the Java engine
  * (sh.siava.pixelxpert.zygisk.ZygiskEntry) from the module APK into every
- * app process via DexClassLoader, enabling status-bar tap-to-top without
- * LSPosed scope.
+ * app process, enabling status-bar tap-to-top without LSPosed scope.
+ *
+ * Two constraints handled here:
+ *  - Zygisk Next loads the .so through its builtin linker from a memfd,
+ *    so dladdr() cannot resolve the module root; the engine APK is taken
+ *    from the Magisk-mounted /system path instead (world-readable).
+ *  - postAppSpecialize runs before the Java Application object exists,
+ *    so engine loading happens on a worker thread that polls
+ *    ActivityThread.currentApplication() until it is available.
  */
 #include <jni.h>
 #include <unistd.h>
@@ -14,6 +21,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #include <android/log.h>
 #include "zygisk.h"
 
@@ -21,6 +29,10 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+
+#define ENGINE_CLASS "sh/siava/pixelxpert/zygisk/ZygiskEntry"
+#define APP_POLL_TRIES 150   /* 150 * 200ms = 30s max wait for Application */
+#define APP_POLL_INTERVAL_US 200000
 
 static JavaVM *g_jvm = NULL;
 static bool g_skip_process = false;
@@ -45,40 +57,20 @@ static bool jstr(JNIEnv *env, jstring *jstr_ptr, char *out, size_t out_len) {
 	return true;
 }
 
-/** Locate the module root: the .so lives at <root>/zygisk/<abi>.so. */
-static bool find_module_root(char *out, size_t out_len) {
-	Dl_info info;
-	memset(&info, 0, sizeof(info));
-	if (dladdr((void *) &find_module_root, &info) == 0 || !info.dli_fname)
-		return false;
-
-	char path[512];
-	snprintf(path, sizeof(path), "%s", info.dli_fname);
-	char *slash = strrchr(path, '/');
-	if (!slash) return false;
-	*slash = '\0';                       // .../zygisk
-	slash = strrchr(path, '/');
-	if (!slash) return false;
-	*slash = '\0';                       // module root
-
-	char probe[600];
-	snprintf(probe, sizeof(probe), "%s/module.prop", path);
-	if (access(probe, R_OK) != 0) return false;
-	snprintf(out, out_len, "%s", path);
-	return true;
-}
-
-/** Find the module APK: Magisk mount first, module-root copy as fallback. */
+/**
+ * Locate the module APK.
+ * 1) Magisk-mounted priv-app copy: world-readable, works from app UIDs
+ *    even when the .so was loaded from a memfd by the builtin linker.
+ * 2) Module-root copy: only usable when dladdr() resolves the real path
+ *    (plain Magisk loads); best effort, app UIDs usually cannot read it.
+ */
 static bool find_module_apk(const char *root, char *out, size_t out_len) {
-	const char *candidates[] = {
-			"/system/priv-app/PixelXpert/PixelXpert.apk",
-	};
-	for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++) {
-		if (access(candidates[i], R_OK) == 0) {
-			snprintf(out, out_len, "%s", candidates[i]);
-			return true;
-		}
+	static const char *mounted = "/system/priv-app/PixelXpert/PixelXpert.apk";
+	if (access(mounted, R_OK) == 0) {
+		snprintf(out, out_len, "%s", mounted);
+		return true;
 	}
+	if (!root[0]) return false;
 	char base[600];
 	snprintf(base, sizeof(base), "%s/system/priv-app/PixelXpert", root);
 	DIR *dir = opendir(base);
@@ -96,11 +88,70 @@ static bool find_module_apk(const char *root, char *out, size_t out_len) {
 	return false;
 }
 
+/** Best-effort module root via dladdr; empty string when unavailable. */
+static void find_module_root(char *out, size_t out_len) {
+	out[0] = '\0';
+	Dl_info info;
+	memset(&info, 0, sizeof(info));
+	if (dladdr((void *) &find_module_root, &info) == 0 || !info.dli_fname)
+		return;
+	char path[512];
+	snprintf(path, sizeof(path), "%s", info.dli_fname);
+	char *slash = strrchr(path, '/');
+	if (!slash) return;
+	*slash = '\0';                       // .../zygisk
+	slash = strrchr(path, '/');
+	if (!slash) return;
+	*slash = '\0';                       // module root
+	char probe[600];
+	snprintf(probe, sizeof(probe), "%s/module.prop", path);
+	if (access(probe, R_OK) != 0) return;  // app UIDs cannot read /data/adb
+	snprintf(out, out_len, "%s", path);
+}
+
 /**
  * Load ZygiskEntry from the module APK and hand it the Application context.
- * Runs in postAppSpecialize: Application already exists (ActivityThread).
+ * Must run on a worker thread: postAppSpecialize fires before the Java
+ * Application exists, so poll currentApplication() until it appears.
  */
-static void load_engine(JNIEnv *env, const char *apk_path) {
+static void *engine_thread(void *arg) {
+	char *apk_path = arg;
+
+	JavaVMAttachArgs aargs;
+	memset(&aargs, 0, sizeof(aargs));
+	aargs.version = JNI_VERSION_1_6;
+	aargs.name = "PixelXpert-Zygisk";
+	JNIEnv *env = NULL;
+	bool attached = false;
+	if (g_jvm && (*g_jvm)->AttachCurrentThread(g_jvm, &env, &aargs) == JNI_OK)
+		attached = true;
+	if (!env) {
+		LOGE("AttachCurrentThread failed");
+		free(apk_path);
+		return NULL;
+	}
+
+	/* Wait for the Application object to be created. */
+	jobject app = NULL;
+	for (int i = 0; i < APP_POLL_TRIES; i++) {
+		jclass at_class = (*env)->FindClass(env, "android/app/ActivityThread");
+		if (!at_class) { (*env)->ExceptionClear(env); break; }
+		jmethodID cur_app = (*env)->GetStaticMethodID(env, at_class,
+		                                              "currentApplication",
+		                                              "()Landroid/app/Application;");
+		if (!cur_app) { (*env)->ExceptionClear(env); break; }
+		app = (*env)->CallStaticObjectMethod(env, at_class, cur_app);
+		if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); app = NULL; }
+		if (app) break;
+		usleep(APP_POLL_INTERVAL_US);
+	}
+	if (!app) {
+		LOGE("application never appeared for %s", apk_path);
+		if (attached) (*g_jvm)->DetachCurrentThread(g_jvm);
+		free(apk_path);
+		return NULL;
+	}
+
 	jclass cl_class = (*env)->FindClass(env, "java/lang/ClassLoader");
 	if (!cl_class) goto fail;
 	jmethodID get_sys = (*env)->GetStaticMethodID(env, cl_class, "getSystemClassLoader",
@@ -124,24 +175,11 @@ static void load_engine(JNIEnv *env, const char *apk_path) {
 	jmethodID load_class = (*env)->GetMethodID(env, cl_class, "loadClass",
 	                                           "(Ljava/lang/String;)Ljava/lang/Class;");
 	if (!load_class) goto fail;
-	jstring j_entry = (*env)->NewStringUTF(env, "sh.siava.pixelxpert.zygisk.ZygiskEntry");
+	jstring j_entry = (*env)->NewStringUTF(env, ENGINE_CLASS);
 	if (!j_entry) goto fail;
 	jclass entry = (*env)->CallObjectMethod(env, dex_cl, load_class, j_entry);
 	if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); goto fail; }
 	if (!entry) goto fail;
-
-	// Application context (postAppSpecialize runs after Application init).
-	jclass at_class = (*env)->FindClass(env, "android/app/ActivityThread");
-	if (!at_class) goto fail;
-	jmethodID cur_app = (*env)->GetStaticMethodID(env, at_class, "currentApplication",
-	                                              "()Landroid/app/Application;");
-	if (!cur_app) goto fail;
-	jobject app = (*env)->CallStaticObjectMethod(env, at_class, cur_app);
-	if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); goto fail; }
-	if (!app) {
-		LOGE("currentApplication() returned null");
-		goto fail;
-	}
 
 	jmethodID attach = (*env)->GetStaticMethodID(env, entry, "attachContext",
 	                                             "(Landroid/content/Context;)V");
@@ -156,11 +194,18 @@ static void load_engine(JNIEnv *env, const char *apk_path) {
 		if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
 	}
 	LOGI("engine loaded from %s", apk_path);
-	return;
+	(*env)->DeleteLocalRef(env, app);
+	if (attached) (*g_jvm)->DetachCurrentThread(g_jvm);
+	free(apk_path);
+	return NULL;
 
 fail:
 	if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
 	LOGE("engine load failed from %s", apk_path);
+	if (app) (*env)->DeleteLocalRef(env, app);
+	if (attached) (*g_jvm)->DetachCurrentThread(g_jvm);
+	free(apk_path);
+	return NULL;
 }
 
 static void pre_app(void *impl, struct zygisk_app_specialize_args *args) {
@@ -182,19 +227,24 @@ static void pre_app(void *impl, struct zygisk_app_specialize_args *args) {
 static void post_app(void *impl, const struct zygisk_app_specialize_args *args) {
 	(void) impl;
 	if (g_skip_process) return;
-	JNIEnv *env = get_env();
-	if (!env || !args) return;
 
-	char root[512], apk[600];
-	if (!find_module_root(root, sizeof(root))) {
-		LOGE("module root not found");
-		return;
-	}
+	char root[512];
+	find_module_root(root, sizeof(root));   // best effort; empty under ZN
+	char apk[600];
 	if (!find_module_apk(root, apk, sizeof(apk))) {
 		LOGE("module APK not found");
 		return;
 	}
-	load_engine(env, apk);
+	/* Application does not exist yet here - load on a polling thread. */
+	char *apk_dup = strdup(apk);
+	if (!apk_dup) return;
+	pthread_t tid;
+	if (pthread_create(&tid, NULL, engine_thread, apk_dup) != 0) {
+		free(apk_dup);
+		LOGE("pthread_create failed");
+	} else {
+		pthread_detach(tid);
+	}
 }
 
 static void pre_server(void *impl, struct zygisk_server_specialize_args *args) {
