@@ -319,10 +319,25 @@ public class StatusbarGestures extends XposedModPack {
 			log("ScrollTop: shade interactor not captured");
 			return false;
 		}
+		// Primary signal: synchronous getters read the live scene transition
+		// state on every call - no flow caching, cannot go stale.
+		try {
+			float shadeExp = (float) callMethod(ShadeInteractorSceneContainerImpl, "getShadeExpansion");
+			float qsExp = (float) callMethod(ShadeInteractorSceneContainerImpl, "getQsExpansion");
+			boolean expanded = shadeExp > 0f || qsExp > 0f;
+			if (expanded) {
+				log("ScrollTop: blocked by shade gate (live): shade=" + shadeExp + " qs=" + qsExp);
+			}
+			return expanded;
+		} catch (Throwable getterErr) {
+			log("ScrollTop: live shade getters unavailable, falling back to flow: " + getterErr);
+		}
+		// Fallback: derived StateFlow - known to freeze (e.g. after QS screen
+		// recording starts) but kept for builds without the sync getters.
 		try {
 			boolean anyExpanded = (boolean) callMethod(callMethod(ShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
 			if (anyExpanded) {
-				log("ScrollTop: blocked by shade gate: isAnyExpanded=true");
+				log("ScrollTop: blocked by shade gate (flow fallback): isAnyExpanded=true");
 			}
 			return anyExpanded;
 		} catch (Throwable t) {
