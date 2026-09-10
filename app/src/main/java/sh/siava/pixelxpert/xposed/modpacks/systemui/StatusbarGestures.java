@@ -134,6 +134,7 @@ public class StatusbarGestures extends XposedModPack {
 			@Override
 			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
 				if (StatusbarTapScrollTop) {
+					log("ScrollTop: single tap confirmed x=" + (int) e.getX());
 					scrollForegroundAppToTop(e.getX());
 				}
 				return false;
