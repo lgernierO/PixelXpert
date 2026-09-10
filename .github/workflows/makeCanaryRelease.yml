@@ -62,6 +62,25 @@ jobs:
             echo ${{ secrets.SIGNING_KEY }} | base64 --decode > ${{ github.workspace }}/ReleaseKey.jks
           fi
       
+    - name: Build Zygisk libraries
+      run: |
+          set -euo pipefail
+          NDK_DIR=""
+          if [ -d "$ANDROID_HOME/ndk" ]; then
+            NDK_DIR=$(ls -d "$ANDROID_HOME/ndk/"* | sort -V | tail -1)
+          fi
+          if [ -z "$NDK_DIR" ]; then
+            echo "NDK not found, keeping committed prebuilt zygisk libraries"
+            exit 0
+          fi
+          TC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SRC=zygisk/src
+          OUT=MagiskModBase/zygisk
+          mkdir -p "$OUT"
+          "$TC/aarch64-linux-android24-clang++" -nostdlib++ -std=c++17 -shared -fPIC -O2 -s -I "$SRC" -o "$OUT/arm64-v8a.so" "$SRC/module.cpp"
+          "$TC/armv7a-linux-androideabi24-clang++" -nostdlib++ -std=c++17 -shared -fPIC -O2 -s -I "$SRC" -o "$OUT/armeabi-v7a.so" "$SRC/module.cpp"
+          file "$OUT"/*
+
     - name: Gradle Build
       run: ./gradlew buildCanary -Pchannel=canary
 
