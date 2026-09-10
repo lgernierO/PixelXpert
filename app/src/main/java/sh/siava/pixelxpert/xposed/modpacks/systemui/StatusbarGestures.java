@@ -297,18 +297,32 @@ public class StatusbarGestures extends XposedModPack {
 		if (mShadeInteractorAnyExpanded()) return false;
 		if (mKeyguardInteractor == null) return true;
 		try {
-			return callMethod(getObjectField(mKeyguardInteractor, "isKeyguardShowing"), "getValue").equals(false)
-					&& !callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue").equals(true);
-		} catch (Throwable ignored) {
+			Object keyguardShowing = callMethod(getObjectField(mKeyguardInteractor, "isKeyguardShowing"), "getValue");
+			Object bouncerShowing = callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue");
+			boolean allowed = keyguardShowing.equals(false) && !bouncerShowing.equals(true);
+			if (!allowed) {
+				log("ScrollTop: blocked by keyguard gate: showing=" + keyguardShowing + " bouncer=" + bouncerShowing);
+			}
+			return allowed;
+		} catch (Throwable t) {
+			log("ScrollTop: keyguard gate error: " + t);
 			return true;
 		}
 	}
 
 	private boolean mShadeInteractorAnyExpanded() {
-		if (ShadeInteractorSceneContainerImpl == null) return false;
+		if (ShadeInteractorSceneContainerImpl == null) {
+			log("ScrollTop: shade interactor not captured");
+			return false;
+		}
 		try {
-			return (boolean) callMethod(callMethod(ShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
-		} catch (Throwable ignored) {
+			boolean anyExpanded = (boolean) callMethod(callMethod(ShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
+			if (anyExpanded) {
+				log("ScrollTop: blocked by shade gate: isAnyExpanded=true");
+			}
+			return anyExpanded;
+		} catch (Throwable t) {
+			log("ScrollTop: shade gate error: " + t);
 			return false;
 		}
 	}
