@@ -386,7 +386,10 @@ public class StatusbarGestures extends XposedModPack {
 		new Thread(() -> {
 			try {
 				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP));
-			} catch (Throwable ignored) {}
+				log("ScrollTop: app-side broadcast sent");
+			} catch (Throwable t) {
+				log("ScrollTop: app-side broadcast failed: " + t);
+			}
 		}).start();
 	}
 
