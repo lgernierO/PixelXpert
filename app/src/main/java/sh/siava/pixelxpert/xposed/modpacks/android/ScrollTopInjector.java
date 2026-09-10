@@ -1,9 +1,6 @@
 package sh.siava.pixelxpert.xposed.modpacks.android;
 
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.os.SystemClock;
 import android.view.InputDevice;
 import android.view.InputEvent;
@@ -11,7 +8,6 @@ import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 
 import io.github.libxposed.api.XposedModuleInterface;
-import sh.siava.pixelxpert.Constants;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.FrameworkModPack;
 import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
@@ -54,23 +50,11 @@ public class ScrollTopInjector extends XposedModPack {
 				.afterConstruction()
 				.run(param -> mInputManagerService = param.thisObject);
 
-		BroadcastReceiver receiver = new BroadcastReceiver() {
-			@Override
-			public void onReceive(Context context, Intent intent) {
-				new Thread(() -> {
-					try {
-						injectMoveHome();
-					} catch (Throwable ignored) {}
-				}).start();
-			}
-		};
-
-		IntentFilter filter = new IntentFilter(Constants.ACTION_SCROLL_TOP);
-		// Signature|privileged gate: SystemUI holds STATUS_BAR_SERVICE, so only
-		// the trusted status-bar sender can trigger a MOVE_HOME injection.
-		mContext.registerReceiver(receiver, filter,
-				"android.permission.STATUS_BAR_SERVICE", null,
-				Context.RECEIVER_EXPORTED);
+		// NOTE: the former ACTION_SCROLL_TOP receiver was removed. The
+		// broadcast is now sent on every tap (the app-side MIUI-style engine
+		// is the primary path), and injecting MOVE_HOME each time would fling
+		// the user to the launcher instead of scrolling the app to top. This
+		// pack stays registered for potential system_server-side hooks only.
 	}
 
 	/**

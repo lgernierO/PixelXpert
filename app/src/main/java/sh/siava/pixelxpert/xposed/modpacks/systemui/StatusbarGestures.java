@@ -341,11 +341,23 @@ public class StatusbarGestures extends XposedModPack {
 	 * View.onScrollToTop - implemented by AbsListView, ScrollView and
 	 * RecyclerView to smooth-scroll to position 0.
 	 * <p>
-	 * The WMS entry point is guarded by android.permission.STATUS_BAR_SERVICE,
-	 * which SystemUI holds - so we invoke it directly from here.  The tap X is
-	 * forwarded so WMS can pick the window under the finger (multi-window).
-	 * If the native call fails, fall back to the system_server-side MOVE_HOME
-	 * injection (ScrollTopInjector).
+	 * Reverse-engineered from this device's MIUI framework (HyperOS V816):
+	 * MIUI never uses the AOSP View.onScrollToTop pipeline - its
+	 * MiuiInputManagerService.scrollToTop() notifies per-window listeners in
+	 * every app process, and those listeners reflectively scroll whatever
+	 * scrollable view they find (RecyclerView, WebView, custom containers -
+	 * views that have no onScrollToTop at all). That is why apps that scroll
+	 * on MIUI stayed dead on the native Pixel path: androidx RecyclerView and
+	 * WebView simply do not implement onScrollToTop.
+	 * <p>
+	 * Pixel adaptation: keep the native WMS dispatchScrollToTop first (it is
+	 * cheap and handles framework widgets), then ALWAYS notify the app-side
+	 * engine (ScrollTopEnabler, same process as the target app) which does
+	 * the MIUI-style reflective scroll - it covers androidx/WebView/custom
+	 * containers and no-ops gracefully when the native path already worked.
+	 * The broadcast targets the module package so only injected processes
+	 * receive it; the receiver enforces no permission (harmless: it only
+	 * scrolls the top of a view tree).
 	 */
 	private void scrollForegroundAppToTop(float x) {
 		long now = SystemClock.uptimeMillis();
@@ -360,9 +372,14 @@ public class StatusbarGestures extends XposedModPack {
 			windowManagerService.getClass()
 					.getMethod("dispatchScrollToTop", int.class, int.class, int.class)
 					.invoke(windowManagerService, Display.DEFAULT_DISPLAY, -1, Math.round(x));
-			return;
 		} catch (Throwable ignored) {}
 
+		// App-side MIUI-style engine: reaches views the native path cannot
+		// (androidx RecyclerView, WebView, custom scrollers). Sent regardless
+		// of the outcome above. Mirrors MIUI's design: the request is
+		// announced to every injected process and each receiver decides
+		// whether its window holds input focus - SystemUI cannot know the
+		// foreground package here, so no setPackage targeting.
 		new Thread(() -> {
 			try {
 				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP));
