@@ -19,12 +19,11 @@ import java.lang.ref.WeakReference;
  * Zygisk-side engine for the status-bar tap-to-top feature.
  * <p>
  * Loaded by the Zygisk module (zygisk/&lt;abi&gt;.so) in every app process via
- * DexClassLoader from the module APK - no LSPosed scope required. It mirrors
- * the LSPosed engine in ScrollTopEnabler: on the ACTION_SCROLL_TOP broadcast
- * (sent by StatusbarGestures in SystemUI after the native WMS
- * dispatchScrollToTop call) the foreground window's scrollable views are
- * scrolled to the top, MIUI-style: recursive discovery via
- * canScrollVertically(-1) plus reflective scrolling, covering androidx
+ * DexClassLoader from the module APK - no LSPosed scope required. On the
+ * ACTION_SCROLL_TOP broadcast (sent by StatusbarGestures in SystemUI after
+ * the native WMS dispatchScrollToTop call) the foreground window's
+ * scrollable views are scrolled to the top, MIUI-style: recursive discovery
+ * via canScrollVertically(-1) plus reflective scrolling, covering androidx
  * RecyclerView, WebView and custom containers that never implemented the
  * AOSP onScrollToTop pipeline.
  * <p>
@@ -32,24 +31,83 @@ import java.lang.ref.WeakReference;
  * broadcast when StatusbarTapScrollTop is on), so no preference access is
  * needed here - this process may not have the module's provider available.
  * <p>
+ * Threading note: attachContext()/init() run from postAppSpecialize, BEFORE
+ * the main Looper is prepared. Creating a main-looper Handler in a static
+ * initializer at that point throws ("Can't create handler inside thread that
+ * has not called Looper.prepare()") and the module swallows the exception,
+ * leaving this engine dead while still logging "engine loaded". All main
+ * looper access is therefore lazy.
+ * <p>
  * Pure Java + framework APIs only: this class must never reference Xposed
  * classes, it is loaded in plain app processes.
  */
 public class ZygiskEntry {
-	private static final Handler MAIN = new Handler(Looper.getMainLooper());
 	private static final Object LOCK = new Object();
 	private static WeakReference<Activity> sResumedActivity = new WeakReference<>(null);
-	private static boolean sRegistered = false;
+	private static volatile boolean sLifecycleRegistered = false;
+	private static volatile boolean sReceiverRegistered = false;
+	private static Context sAppContext = null;
+	private static volatile Handler sMain = null;
+
+	/** Main-thread handler, created lazily - the looper does not exist yet
+	 *  when the Zygisk module first loads this class. */
+	private static Handler main() {
+		Handler h = sMain;
+		if (h == null) {
+			Looper looper = Looper.getMainLooper();
+			if (looper == null) return null;
+			h = new Handler(looper);
+			sMain = h;
+		}
+		return h;
+	}
 
 	/** Called by the Zygisk module after the process's Application exists. */
 	public static void init(Context context) {
-		if (context instanceof Application && !sRegistered) {
+		if (context instanceof Application && !sLifecycleRegistered) {
 			synchronized (LOCK) {
-				if (!sRegistered) {
-					sRegistered = true;
+				if (!sLifecycleRegistered) {
+					sLifecycleRegistered = true;
 					((Application) context).registerActivityLifecycleCallbacks(new LifecycleTracker());
 				}
 			}
+		}
+	}
+
+	/** Called by the Zygisk module once the Application instance exists.
+	 *  registerReceiver() is legal from any thread, so no looper is needed
+	 *  here even though the main looper may not be prepared yet. */
+	public static void attachContext(Context context) {
+		Context app = context.getApplicationContext();
+		if (app == null) app = context;
+		synchronized (LOCK) {
+			if (sAppContext != null || sReceiverRegistered) return;
+			sAppContext = app;
+			sReceiverRegistered = true;
+		}
+		registerScrollTopReceiver(app);
+	}
+
+	private static void registerScrollTopReceiver(Context context) {
+		BroadcastReceiver receiver = new BroadcastReceiver() {
+			@Override
+			public void onReceive(Context c, Intent intent) {
+				Handler h = main();
+				if (h != null) {
+					h.post(ZygiskEntry::performMiuiScroll);
+				} else {
+					// No main looper yet: run inline rather than dropping the tap.
+					performMiuiScroll();
+				}
+			}
+		};
+		IntentFilter filter = new IntentFilter("sh.siava.pixelxpert.ACTION_SCROLL_TOP");
+		try {
+			context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
+		} catch (Throwable ignored) {
+			try {
+				context.registerReceiver(receiver, filter);
+			} catch (Throwable ignored2) {}
 		}
 	}
 
@@ -80,42 +138,6 @@ public class ZygiskEntry {
 
 		@Override
 		public void onActivityDestroyed(Activity a) {}
-	}
-
-	static {
-		// Register the receiver as soon as this class is loaded; the Context
-		// arrives via init() but a static holder would race the first broadcast.
-		MAIN.post(ZygiskEntry::registerReceiverWhenReady);
-	}
-
-	private static Context sAppContext = null;
-
-	private static void registerReceiverWhenReady() {
-		Context context = sAppContext;
-		if (context == null) {
-			// init() has not run yet (or returned no context) - retry briefly
-			MAIN.postDelayed(ZygiskEntry::registerReceiverWhenReady, 1000);
-			return;
-		}
-		BroadcastReceiver receiver = new BroadcastReceiver() {
-			@Override
-			public void onReceive(Context c, Intent intent) {
-				MAIN.post(ZygiskEntry::performMiuiScroll);
-			}
-		};
-		IntentFilter filter = new IntentFilter("sh.siava.pixelxpert.ACTION_SCROLL_TOP");
-		try {
-			context.registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED);
-		} catch (Throwable ignored) {
-			try {
-				context.registerReceiver(receiver, filter);
-			} catch (Throwable ignored2) {}
-		}
-	}
-
-	/** Called by the Zygisk module once the Application instance exists. */
-	public static void attachContext(Context context) {
-		if (sAppContext == null) sAppContext = context.getApplicationContext();
 	}
 
 	/**
