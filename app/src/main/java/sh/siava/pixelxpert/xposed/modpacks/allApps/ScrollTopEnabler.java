@@ -4,6 +4,8 @@ import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.findFieldIfExists;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setObjectField;
 
+import android.content.Context;
+
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.CommonModPack;
