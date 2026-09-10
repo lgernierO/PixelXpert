@@ -372,7 +372,10 @@ public class StatusbarGestures extends XposedModPack {
 			windowManagerService.getClass()
 					.getMethod("dispatchScrollToTop", int.class, int.class, int.class)
 					.invoke(windowManagerService, Display.DEFAULT_DISPLAY, -1, Math.round(x));
-		} catch (Throwable ignored) {}
+			log("ScrollTop: WMS dispatchScrollToTop dispatched, x=" + Math.round(x));
+		} catch (Throwable t) {
+			log("ScrollTop: WMS dispatchScrollToTop failed: " + t);
+		}
 
 		// App-side MIUI-style engine: reaches views the native path cannot
 		// (androidx RecyclerView, WebView, custom scrollers). Sent regardless
