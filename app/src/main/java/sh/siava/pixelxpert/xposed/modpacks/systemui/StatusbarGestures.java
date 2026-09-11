@@ -142,6 +142,69 @@ public class StatusbarGestures extends XposedModPack {
 			}
 		});
 
+		// PRIMARY funnel: the framework InputStage. ViewRootImpl$EarlyPostImeInputStage
+		// is a FRAMEWORK class - SystemUI window rebuilds (e.g. the shade window
+		// being recreated when screen recording starts, which detached every
+		// view-level funnel) cannot affect it. processPointerEvent sees every
+		// pointer event of every SystemUI window before view dispatch; the
+		// window root view is resolved per event, so recreation is harmless.
+		boolean inputStageHooked = false;
+		try {
+			ReflectedClass EarlyPostImeStageClass = ReflectedClass.ofIfPossible("android.view.ViewRootImpl$EarlyPostImeInputStage");
+			if (EarlyPostImeStageClass.getClazz() != null) {
+				inputStageHooked = true;
+				EarlyPostImeStageClass
+						.before("processPointerEvent")
+						.run(param -> {
+							if (!StatusbarTapScrollTop) return;
+							Object queuedInputEvent = param.args[0];
+							if (queuedInputEvent == null) return;
+							Object evObj = getObjectField(queuedInputEvent, "mEvent");
+							if (!(evObj instanceof MotionEvent)) return;
+							MotionEvent event = (MotionEvent) evObj;
+
+							// Only status-bar-related windows (scene root / shade window /
+							// status bar window). Resolved per event from the outer
+							// ViewRootImpl, so a rebuilt window still matches.
+							Object viewRoot = getObjectField(param.thisObject, "this$0");
+							if (viewRoot == null) return;
+							Object rootView;
+							try {
+								rootView = callMethod(viewRoot, "getView");
+							} catch (Throwable ignored) {
+								rootView = getObjectField(viewRoot, "view");
+							}
+							if (rootView == null) return;
+							String rootName = rootView.getClass().getName();
+							if (!(rootName.contains("SceneWindowRootView")
+									|| rootName.contains("NotificationShadeWindowView")
+									|| rootName.contains("StatusBarWindowView"))) return;
+
+							boolean isDown = event.getActionMasked() == MotionEvent.ACTION_DOWN;
+							if (isDown) {
+								// Gate ONCE per gesture: transient shade-expansion residue
+								// during screen recording must not split a sequence by
+								// rejecting its MOVE/UP events (that would swallow the tap).
+								if (!isTapToTopAllowed()) return;
+								if (event.getY() > getStatusBarHeight()) return;
+								log("ScrollTop: DOWN accepted (input stage) y=" + (int) event.getY()
+										+ " win=" + rootName.substring(rootName.lastIndexOf('.') + 1));
+								mStatusBarEventSeen = false; // new gesture sequence begins
+							} else if (!mStatusBarEventSeen) {
+								return; // stray MOVE/UP with no accepted DOWN
+							}
+							mSingleTapDetector.onTouchEvent(event);
+							mStatusBarEventSeen = true;
+							});
+			}
+		} catch (Throwable t) {
+			log("ScrollTop: input stage hook failed, using view funnels: " + t);
+		}
+
+		if (!inputStageHooked) {
+		// Legacy view-level funnels (pre-InputStage fallback). Skipped when the
+		// framework funnel above is active - feeding the same sequence twice
+		// would make the detector report a double-tap and swallow the tap.
 		// PRIMARY source, verified on-device: this CANARY build renders the
 		// status bar through the scene container, whose window root view is
 		// SceneWindowRootView. The proven double-tap-to-sleep gesture hooks
@@ -219,7 +282,7 @@ public class StatusbarGestures extends XposedModPack {
 						mStatusBarEventSeen = true;
 					});
 		}
-
+		} // end of legacy view-level funnels
 		// Capture the real status-bar height from the bar view itself, so the
 		// shade-window Y filter tracks the actual strip on every device.
 		PhoneStatusBarViewClass
