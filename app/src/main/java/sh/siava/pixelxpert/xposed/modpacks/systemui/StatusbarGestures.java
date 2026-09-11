@@ -156,13 +156,21 @@ public class StatusbarGestures extends XposedModPack {
 
 					MotionEvent event = (MotionEvent) param.args[0];
 					boolean isDown = event.getActionMasked() == MotionEvent.ACTION_DOWN;
-					if (!isTapToTopAllowed()) return;
-					if (event.getY() > getStatusBarHeight()) return;
-
 					if (isDown) {
+						// Gate ONCE per gesture: transient shade-expansion residue
+						// during screen recording must not split a sequence by
+						// rejecting its MOVE/UP events (that would swallow the tap).
+						if (!isTapToTopAllowed()) return;
+						if (event.getY() > getStatusBarHeight()) return;
 						log("ScrollTop: DOWN accepted y=" + (int) event.getY()
 								+ " barH=" + getStatusBarHeight());
 						mStatusBarEventSeen = false; // new gesture sequence begins
+					} else if (mStatusBarEventSeen) {
+						// sequence already accepted: feed MOVE/UP unconditionally
+						mSingleTapDetector.onTouchEvent(event);
+						return;
+					} else {
+						return; // stray MOVE/UP with no accepted DOWN
 					}
 					mSingleTapDetector.onTouchEvent(event);
 					mStatusBarEventSeen = true;
