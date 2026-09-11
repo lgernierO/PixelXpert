@@ -2,7 +2,6 @@ package sh.siava.pixelxpert.xposed.modpacks.systemui;
 
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.callMethod;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
-import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.log;
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 import android.annotation.SuppressLint;
@@ -135,8 +134,7 @@ public class StatusbarGestures extends XposedModPack {
 			@Override
 			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
 				if (StatusbarTapScrollTop) {
-					log("ScrollTop: single tap confirmed x=" + (int) e.getX());
-					scrollForegroundAppToTop(e.getX());
+						scrollForegroundAppToTop(e.getX());
 				}
 				return false;
 			}
@@ -187,8 +185,6 @@ public class StatusbarGestures extends XposedModPack {
 								// rejecting its MOVE/UP events (that would swallow the tap).
 								if (!isTapToTopAllowed()) return;
 								if (event.getY() > getStatusBarHeight()) return;
-								log("ScrollTop: DOWN accepted (input stage) y=" + (int) event.getY()
-										+ " win=" + rootName.substring(rootName.lastIndexOf('.') + 1));
 								mStatusBarEventSeen = false; // new gesture sequence begins
 							} else if (!mStatusBarEventSeen) {
 								return; // stray MOVE/UP with no accepted DOWN
@@ -198,8 +194,7 @@ public class StatusbarGestures extends XposedModPack {
 							});
 			}
 		} catch (Throwable t) {
-			log("ScrollTop: input stage hook failed, using view funnels: " + t);
-		}
+					}
 
 		if (!inputStageHooked) {
 		// Legacy view-level funnels (pre-InputStage fallback). Skipped when the
@@ -225,8 +220,6 @@ public class StatusbarGestures extends XposedModPack {
 						// rejecting its MOVE/UP events (that would swallow the tap).
 						if (!isTapToTopAllowed()) return;
 						if (event.getY() > getStatusBarHeight()) return;
-						log("ScrollTop: DOWN accepted y=" + (int) event.getY()
-								+ " barH=" + getStatusBarHeight());
 						mStatusBarEventSeen = false; // new gesture sequence begins
 					} else if (mStatusBarEventSeen) {
 						// sequence already accepted: feed MOVE/UP unconditionally
@@ -376,44 +369,34 @@ public class StatusbarGestures extends XposedModPack {
 			Object bouncerShowing = callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue");
 			boolean allowed = keyguardShowing.equals(false) && !bouncerShowing.equals(true);
 			if (!allowed) {
-				log("ScrollTop: blocked by keyguard gate: showing=" + keyguardShowing + " bouncer=" + bouncerShowing);
 			}
 			return allowed;
 		} catch (Throwable t) {
-			log("ScrollTop: keyguard gate error: " + t);
-			return true;
+						return true;
 		}
 	}
 
 	private boolean mShadeInteractorAnyExpanded() {
 		if (ShadeInteractorSceneContainerImpl == null) {
-			log("ScrollTop: shade interactor not captured");
-			return false;
+						return false;
 		}
 		// Primary signal: synchronous getters read the live scene transition
 		// state on every call - no flow caching, cannot go stale.
 		try {
 			float shadeExp = (float) callMethod(ShadeInteractorSceneContainerImpl, "getShadeExpansion");
 			float qsExp = (float) callMethod(ShadeInteractorSceneContainerImpl, "getQsExpansion");
-			boolean expanded = shadeExp > 0f || qsExp > 0f;
-			if (expanded) {
-				log("ScrollTop: blocked by shade gate (live): shade=" + shadeExp + " qs=" + qsExp);
-			}
-			return expanded;
+			return shadeExp > 0f || qsExp > 0f;
 		} catch (Throwable getterErr) {
-			log("ScrollTop: live shade getters unavailable, falling back to flow: " + getterErr);
 		}
 		// Fallback: derived StateFlow - known to freeze (e.g. after QS screen
 		// recording starts) but kept for builds without the sync getters.
 		try {
 			boolean anyExpanded = (boolean) callMethod(callMethod(ShadeInteractorSceneContainerImpl, "isAnyExpanded"), "getValue");
 			if (anyExpanded) {
-				log("ScrollTop: blocked by shade gate (flow fallback): isAnyExpanded=true");
 			}
 			return anyExpanded;
 		} catch (Throwable t) {
-			log("ScrollTop: shade gate error: " + t);
-			return false;
+						return false;
 		}
 	}
 
@@ -477,10 +460,8 @@ public class StatusbarGestures extends XposedModPack {
 			windowManagerService.getClass()
 					.getMethod("dispatchScrollToTop", int.class, int.class, int.class)
 					.invoke(windowManagerService, Display.DEFAULT_DISPLAY, -1, Math.round(x));
-			log("ScrollTop: WMS dispatchScrollToTop dispatched, x=" + Math.round(x));
 		} catch (Throwable t) {
-			log("ScrollTop: WMS dispatchScrollToTop failed: " + t);
-		}
+					}
 
 		// App-side MIUI-style engine: reaches views the native path cannot
 		// (androidx RecyclerView, WebView, custom scrollers). Sent regardless
@@ -491,9 +472,7 @@ public class StatusbarGestures extends XposedModPack {
 		new Thread(() -> {
 			try {
 				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP));
-				log("ScrollTop: app-side broadcast sent");
 			} catch (Throwable t) {
-				log("ScrollTop: app-side broadcast failed: " + t);
 			}
 		}).start();
 	}
