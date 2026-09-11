@@ -172,9 +172,18 @@ static bool hook_dispatch_scroll_to_top(JNIEnv *env, jobject entry_class_ref) {
 	if (!getDeclaredMethod) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
 
 	jstring name = env->NewStringUTF("dispatchScrollToTop");
+	/* dispatchScrollToTop takes a PRIMITIVE int - resolve int.class via
+	 * Integer.TYPE; java/lang/Integer would never match the signature. */
 	jclass intClass = env->FindClass("java/lang/Integer");
 	jclass classClass = static_cast<jclass>(methodClass);
-	jobjectArray params = env->NewObjectArray(1, classClass, intClass);
+	jobject intType = NULL;
+	if (intClass) {
+		jfieldID typeField = env->GetStaticFieldID(intClass, "TYPE", "Ljava/lang/Class;");
+		if (typeField) intType = env->GetStaticObjectField(intClass, typeField);
+	}
+	if (env->ExceptionCheck()) env->ExceptionClear();
+	if (!intType) return false;
+	jobjectArray params = env->NewObjectArray(1, classClass, intType);
 	if (!name || !params) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
 	/* dispatchScrollToTop may be declared on ViewGroup or inherited from View;
 	 * hidden-API restrictions may also block reflection here. Walk the
