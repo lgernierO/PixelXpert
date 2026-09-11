@@ -364,8 +364,8 @@ static void post_server(void *impl, const struct zygisk_server_specialize_args *
 
 static struct zygisk_module_abi g_abi;
 
-__attribute__((visibility("default")))
-void zygisk_module_entry(struct zygisk_api *api, JNIEnv *env) {
+__attribute__((visibility("default"), used))
+extern "C" void zygisk_module_entry(struct zygisk_api *api, JNIEnv *env) {
 	if (!api || !env) return;
 	if (env->GetJavaVM(&g_jvm) != JNI_OK) return;
 
@@ -382,7 +382,7 @@ void zygisk_module_entry(struct zygisk_api *api, JNIEnv *env) {
 	}
 }
 
-__attribute__((visibility("default")))
-void zygisk_companion_entry(int client) {
+__attribute__((visibility("default"), used))
+extern "C" void zygisk_companion_entry(int client) {
 	if (client >= 0) close(client);
 }
