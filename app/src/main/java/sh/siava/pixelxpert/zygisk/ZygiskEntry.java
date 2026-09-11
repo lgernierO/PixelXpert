@@ -19,17 +19,24 @@ import java.lang.ref.WeakReference;
  * Zygisk-side engine for the status-bar tap-to-top feature.
  * <p>
  * Loaded by the Zygisk module (zygisk/&lt;abi&gt;.so) in every app process via
- * DexClassLoader from the module APK - no LSPosed scope required. On the
- * ACTION_SCROLL_TOP broadcast (sent by StatusbarGestures in SystemUI after
- * the native WMS dispatchScrollToTop call) the foreground window's
- * scrollable views are scrolled to the top, MIUI-style: recursive discovery
- * via canScrollVertically(-1) plus reflective scrolling, covering androidx
- * RecyclerView, WebView and custom containers that never implemented the
- * AOSP onScrollToTop pipeline.
+ * DexClassLoader from the module APK - no LSPosed scope required. Two trigger
+ * paths feed the same MIUI-style scroll engine:
+ * <ol>
+ * <li><b>LSPlant hook</b> (primary): the native module hooks
+ * ViewGroup.dispatchScrollToTop(I)Z; when the WMS native dispatch reaches this
+ * process the stub invokes {@link #onDispatchScrollToTop} with the window root
+ * view and the tap x coordinate.</li>
+ * <li><b>Broadcast fallback</b>: ACTION_SCROLL_TOP from SystemUI, used when
+ * LSPlant init/hook fails on a given device.</li>
+ * </ol>
+ * The scroll engine itself mirrors MIUI's ViewRootImplStubImpl listener:
+ * recursive discovery via canScrollVertically(-1) plus reflective scrolling,
+ * covering androidx RecyclerView, WebView and custom containers that never
+ * implemented the AOSP onScrollToTop pipeline.
  * <p>
- * The feature switch is checked on the trigger side (SystemUI only sends the
- * broadcast when StatusbarTapScrollTop is on), so no preference access is
- * needed here - this process may not have the module's provider available.
+ * The feature switch is checked on the trigger side (SystemUI only calls WMS /
+ * sends the broadcast when StatusbarTapScrollTop is on), so no preference
+ * access is needed here - this process may not have the module's provider.
  * <p>
  * Threading note: attachContext()/init() run from postAppSpecialize, BEFORE
  * the main Looper is prepared. Creating a main-looper Handler in a static
@@ -92,13 +99,7 @@ public class ZygiskEntry {
 		BroadcastReceiver receiver = new BroadcastReceiver() {
 			@Override
 			public void onReceive(Context c, Intent intent) {
-				Handler h = main();
-				if (h != null) {
-					h.post(ZygiskEntry::performMiuiScroll);
-				} else {
-					// No main looper yet: run inline rather than dropping the tap.
-					performMiuiScroll();
-				}
+				runOnMainThread(ZygiskEntry::performMiuiScroll);
 			}
 		};
 		IntentFilter filter = new IntentFilter("sh.siava.pixelxpert.ACTION_SCROLL_TOP");
@@ -109,6 +110,43 @@ public class ZygiskEntry {
 				context.registerReceiver(receiver, filter);
 			} catch (Throwable ignored2) {}
 		}
+	}
+
+	private static void runOnMainThread(Runnable r) {
+		Handler h = main();
+		if (h != null) {
+			h.post(r);
+		} else {
+			// No main looper yet: run inline rather than dropping the tap.
+			r.run();
+		}
+	}
+
+	/**
+	 * LSPlant callback. The generated stub invokes this instance method with
+	 * Object[]{this, args...} whenever ViewGroup.dispatchScrollToTop(I)Z is
+	 * called in this process; args[0] is the dispatching view (the window
+	 * root), args[1] is the boxed x coordinate. Must return the boxed result
+	 * (Boolean) of the original method - we return false so the AOSP pipeline
+	 * treats the event as unhandled and our own engine does the scrolling.
+	 */
+	public Object onDispatchScrollToTop(Object[] args) {
+		try {
+			View root = args != null && args.length > 0 && args[0] instanceof View
+					? (View) args[0] : null;
+			int x = args != null && args.length > 1 && args[1] instanceof Number
+					? ((Number) args[1]).intValue() : 0;
+			final View fRoot = root;
+			final int fX = x;
+			runOnMainThread(() -> {
+				if (fRoot != null) {
+					scrollToTopRecursive(fRoot);
+				} else {
+					performMiuiScroll();
+				}
+			});
+		} catch (Throwable ignored) {}
+		return Boolean.FALSE;
 	}
 
 	/** Tracks the resumed activity so the broadcast can find the focused window. */

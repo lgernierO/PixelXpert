@@ -158,23 +158,58 @@ static bool lsplant_init(JNIEnv *env) {
  * Object back (boxed boolean for a boolean method).
  */
 static bool hook_dispatch_scroll_to_top(JNIEnv *env, jobject entry_class_ref) {
+	/* LSPlant operates on java/lang/reflect/Method objects (it calls
+	 * ArtMethod::FromReflectedMethod and method_get_name on both the target
+	 * and the callback), so resolve both via reflection - jmethodID won't do. */
+	jclass methodClass = env->FindClass("java/lang/Class");
+	if (!methodClass) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+
 	jclass viewGroupClass = env->FindClass("android/view/ViewGroup");
 	if (!viewGroupClass) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
-	jmethodID target = env->GetMethodID(viewGroupClass, "dispatchScrollToTop", "(I)Z");
-	if (!target) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	// fetch Method objects via Class.getDeclaredMethod (jmethodID is not enough for LSPlant)
+	jmethodID getDeclaredMethod = env->GetMethodID(methodClass, "getDeclaredMethod",
+	                                               "(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;");
+	if (!getDeclaredMethod) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+
+	jstring name = env->NewStringUTF("dispatchScrollToTop");
+	jclass intClass = env->FindClass("java/lang/Integer");
+	jclass classClass = static_cast<jclass>(methodClass);
+	jobjectArray params = env->NewObjectArray(1, classClass, intClass);
+	if (!name || !params) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	/* dispatchScrollToTop may be declared on ViewGroup or inherited from View;
+	 * hidden-API restrictions may also block reflection here. Walk the
+	 * superclass chain; failure is non-fatal (broadcast fallback stays). */
+	jobject target = NULL;
+	jclass clazz = viewGroupClass;
+	jmethodID getNameM = env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
+	while (clazz) {
+		jobject m = env->CallObjectMethod(clazz, getDeclaredMethod, name, params);
+		if (env->ExceptionCheck()) env->ExceptionClear();
+		if (m) { target = m; break; }
+		jmethodID getSuper = env->GetMethodID(classClass, "getSuperclass", "()Ljava/lang/Class;");
+		if (!getSuper) break;
+		jobject sup = env->CallObjectMethod(clazz, getSuper);
+		if (env->ExceptionCheck()) { env->ExceptionClear(); break; }
+		if (!sup || sup == clazz) break;
+		clazz = static_cast<jclass>(sup);
+	}
+	if (!target) return false;
 
 	jclass entryClass = static_cast<jclass>(entry_class_ref);
-	// LSPlant requires hooker_object instanceof the callback's declaring
-	// class - use a ZygiskEntry instance (default constructor).
+	// The callback must be a VIRTUAL method of hooker_object (the generated
+	// stub uses InvokeVirtualObject) and hooker_object must be an instance of
+	// the callback's declaring class - use a ZygiskEntry instance.
 	jmethodID entryCtor = env->GetMethodID(entryClass, "<init>", "()V");
 	jobject hooker_object = entryCtor ? env->NewObject(entryClass, entryCtor) : NULL;
 	if (!hooker_object) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
 
-	jmethodID callback = env->GetStaticMethodID(entryClass, "onDispatchScrollToTop",
-	                                            "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;");
-	if (!callback) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jstring cbName = env->NewStringUTF("onDispatchScrollToTop");
+	if (!cbName) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jobject callback = env->CallObjectMethod(entryClass, getDeclaredMethod, cbName, NULL);
+	if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
+	if (!callback) return false;
 
-	jobject backup = lsplant::Hook(env, (jobject) target, hooker_object, (jobject) callback);
+	jobject backup = lsplant::Hook(env, target, hooker_object, callback);
 	if (!backup) return false;
 	return true;
 }
