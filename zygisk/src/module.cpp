@@ -214,7 +214,13 @@ static bool hook_dispatch_scroll_to_top(JNIEnv *env, jobject entry_class_ref) {
 
 	jstring cbName = env->NewStringUTF("onDispatchScrollToTop");
 	if (!cbName) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
-	jobject callback = env->CallObjectMethod(entryClass, getDeclaredMethod, cbName, NULL);
+	/* The callback takes ONE Object[] parameter - passing NULL here means
+	 * "zero args" and would never match. Build Class[]{Object[].class}. */
+	jclass objArrClass = env->FindClass("[Ljava/lang/Object;");
+	if (!objArrClass) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jobjectArray cbParams = env->NewObjectArray(1, classClass, objArrClass);
+	if (!cbParams) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jobject callback = env->CallObjectMethod(entryClass, getDeclaredMethod, cbName, cbParams);
 	if (env->ExceptionCheck()) { env->ExceptionClear(); return false; }
 	if (!callback) return false;
 
