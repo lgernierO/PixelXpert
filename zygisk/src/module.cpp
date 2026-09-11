@@ -138,6 +138,10 @@ static void *art_symbol_prefix_resolver(std::string_view prefix) {
 }
 
 static bool lsplant_init(JNIEnv *env) {
+	if (shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false) != 0) {
+		LOGE("shadowhook_init failed errno=%d", shadowhook_get_errno());
+		return false;
+	}
 	lsplant::InitInfo info{
 			.inline_hooker = inline_hooker,
 			.inline_unhooker = inline_unhooker,
@@ -157,7 +161,30 @@ static bool lsplant_init(JNIEnv *env) {
  * calls callback_method(hooker_object, Object[]{this, args...}) and expects
  * Object back (boxed boolean for a boolean method).
  */
+static bool exempt_hidden_api(JNIEnv *env) {
+	jclass vmRuntimeClass = env->FindClass("dalvik/system/VMRuntime");
+	if (!vmRuntimeClass) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jmethodID getRuntime = env->GetStaticMethodID(vmRuntimeClass, "getRuntime", "()Ldalvik/system/VMRuntime;");
+	if (!getRuntime) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jmethodID setExemptions = env->GetMethodID(vmRuntimeClass, "setHiddenApiExemptions", "([Ljava/lang/String;)Z");
+	if (!setExemptions) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jobject runtime = env->CallStaticObjectMethod(vmRuntimeClass, getRuntime);
+	if (!runtime) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jclass stringClass = env->FindClass("java/lang/String");
+	if (!stringClass) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jobjectArray sigs = env->NewObjectArray(1, stringClass, env->NewStringUTF("L"));
+	if (!sigs) { if (env->ExceptionCheck()) env->ExceptionClear(); return false; }
+	jboolean ok = env->CallBooleanMethod(runtime, setExemptions, sigs);
+	if (env->ExceptionCheck()) env->ExceptionClear();
+	return ok == JNI_TRUE;
+}
+
 static bool hook_dispatch_scroll_to_top(JNIEnv *env, jobject entry_class_ref) {
+	/* Hidden-API exemption first: JNI is exempt from enforcement, reflection
+	 * is not; getDeclaredMethod on dispatchScrollToTop needs it. */
+	if (!exempt_hidden_api(env)) {
+		LOGE("hidden api exemption failed - reflection lookups may be blocked");
+	}
 	/* LSPlant operates on java/lang/reflect/Method objects (it calls
 	 * ArtMethod::FromReflectedMethod and method_get_name on both the target
 	 * and the callback), so resolve both via reflection - jmethodID won't do. */
