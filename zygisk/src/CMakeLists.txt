@@ -21,6 +21,9 @@ set_target_properties(pixelxpert_zygisk PROPERTIES
         CXX_SCAN_FOR_MODULES ON
         LIBRARY_OUTPUT_NAME pixelxpert_zygisk
         ANDROID_API 26)
-target_include_directories(pixelxpert_zygisk PRIVATE LSPlant-jni/include)
+target_include_directories(pixelxpert_zygisk PRIVATE
+        LSPlant-jni/include
+        shadowhook-cpp/include
+        shadowhook-cpp/third_party/xdl)
 target_link_libraries(pixelxpert_zygisk PRIVATE lsplant_static shadowhook_static log)
 target_link_options(pixelxpert_zygisk PRIVATE -Wl,--exclude-libs,ALL)
