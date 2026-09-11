@@ -124,7 +124,7 @@ jobs:
             -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_RTREE \
             -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_MATH_FUNCTIONS \
             -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_ENABLE_COLUMN_METADATA \
-            sqlite3.c shell.c -o ../sqlite3 -ldl -lm -lpthread
+            sqlite3.c shell.c -o ../sqlite3 -ldl -lm
           cd ..
           $TC/llvm-strip --strip-all sqlite3
           file sqlite3
