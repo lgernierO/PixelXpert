@@ -89,6 +89,7 @@ jobs:
                -DANDROID_ABI=$A -DANDROID_PLATFORM=android-24 \
                -DCMAKE_C_COMPILER_LAUNCHER="" -DANDROID_NDK="$NDK_DIR" .. && \
              ${CMAKE_BIN:+$CMAKE_BIN/}ninja pixelxpert_zygisk && \
+             "$TC/llvm-strip" --strip-all libpixelxpert_zygisk.so && \
              cp -v libpixelxpert_zygisk.so "../../../$OUT/$A.so")
           done
           file "$OUT"/*
