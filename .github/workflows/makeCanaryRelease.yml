@@ -62,7 +62,7 @@ jobs:
             echo ${{ secrets.SIGNING_KEY }} | base64 --decode > ${{ github.workspace }}/ReleaseKey.jks
           fi
       
-    - name: Build Zygisk libraries
+    - name: Build Zygisk libraries (LSPlant)
       run: |
           set -euo pipefail
           NDK_DIR=""
@@ -70,15 +70,27 @@ jobs:
             NDK_DIR=$(ls -d "$ANDROID_HOME/ndk/"* | sort -V | tail -1)
           fi
           if [ -z "$NDK_DIR" ]; then
-            echo "NDK not found, keeping committed prebuilt zygisk libraries"
-            exit 0
+            echo "NDK not found"
+            exit 1
           fi
           TC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          SRC=zygisk/src
+          cmake "$TC/cmake" 2>/dev/null || true
+          # NDK ships its own cmake/ninja
+          CMAKE_BIN="$NDK_DIR"/toolchains/llvm/prebuilt/linux-x86_64/bin
+          if [ ! -x "$CMAKE_BIN/cmake" ]; then CMAKE_BIN=""; fi
+          ZSRC=zygisk/src
           OUT=MagiskModBase/zygisk
-          mkdir -p "$OUT"
-          "$TC/aarch64-linux-android24-clang" -std=c11 -shared -fPIC -O2 -s -I "$SRC" -o "$OUT/arm64-v8a.so" "$SRC/module.c" -llog -Wl,-soname,libpixelxpert_zygisk.so -Wl,-z,now -Wl,-z,defs
-          "$TC/armv7a-linux-androideabi24-clang" -std=c11 -shared -fPIC -O2 -s -I "$SRC" -o "$OUT/armeabi-v7a.so" "$SRC/module.c" -llog -Wl,-soname,libpixelxpert_zygisk.so -Wl,-z,now -Wl,-z,defs
+          mkdir -p "$OUT" "$ZSRC/build-a64" "$ZSRC/build-arm"
+          for ABI in a64 arm; do
+            if [ "$ABI" = "a64" ]; then A=arm64-v8a; T=aarch64-linux-android24; else A=armeabi-v7a; T=armv7a-linux-androideabi24; fi
+            (cd "$ZSRC/build-$ABI" && \
+             ${CMAKE_BIN:+$CMAKE_BIN/}cmake -G Ninja -DCMAKE_BUILD_TYPE=Release \
+               -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
+               -DANDROID_ABI=$A -DANDROID_PLATFORM=android-24 \
+               -DCMAKE_C_COMPILER_LAUNCHER="" -DANDROID_NDK="$NDK_DIR" .. && \
+             ${CMAKE_BIN:+$CMAKE_BIN/}ninja pixelxpert_zygisk && \
+             cp -v libpixelxpert_zygisk.so "../../../$OUT/$A.so")
+          done
           file "$OUT"/*
 
     - name: Gradle Build
@@ -132,3 +144,4 @@ jobs:
         git commit -m 'Version update: Release'
         git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
         git push origin HEAD:canary
+
