@@ -58,6 +58,7 @@ public class XPLauncher extends XposedModule implements ServiceConnection {
 	private static final int PREFS_LOAD_MAX_ATTEMPTS = 30;
 	private static final int PREFS_LOAD_RETRY_DELAY_MILLIS = 1000;
 	private boolean hookTesterLoaded = false;
+	private static volatile boolean hotReloadRequested = false;
 	public static Resources moduleResources;
 
 	public XPLauncher()
@@ -82,6 +83,9 @@ public class XPLauncher extends XposedModule implements ServiceConnection {
 
 	@Override
 	public boolean onHotReloading(@NonNull XposedModuleInterface.HotReloadingParam param) {
+		// API 102 contract: module-owned threads must be stopped before returning true,
+		// otherwise they survive into the next generation.
+		hotReloadRequested = true;
 		return true;
 	}
 
@@ -273,14 +277,16 @@ public class XPLauncher extends XposedModule implements ServiceConnection {
 
 	private void forceConnectRootService() {
 		new Thread(() -> {
-			while (SystemUtils.UserManager() == null
-					       || !SystemUtils.UserManager().isUserUnlocked()) //device is still CE encrypted
+			while (!hotReloadRequested && (SystemUtils.UserManager() == null
+					       || !SystemUtils.UserManager().isUserUnlocked())) //device is still CE encrypted
 			{
 				SystemUtils.threadSleep(2000);
 			}
+			if (hotReloadRequested) return;
+
 			SystemUtils.threadSleep(5000); //wait for the unlocked account to settle down a bit
 
-			while (rootProxyIPC == null) {
+			while (!hotReloadRequested && rootProxyIPC == null) {
 				connectRootService();
 				SystemUtils.threadSleep(5000);
 			}
@@ -350,3 +356,4 @@ public class XPLauncher extends XposedModule implements ServiceConnection {
 		void run(IPixelXpertProxy proxy) throws RemoteException;
 	}
 }
+

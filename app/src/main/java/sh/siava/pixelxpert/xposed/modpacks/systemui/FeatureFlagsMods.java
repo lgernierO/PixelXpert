@@ -5,7 +5,6 @@ import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setObject
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 
-
 import android.content.Context;
 
 import java.util.regex.Pattern;
@@ -47,17 +46,7 @@ public class FeatureFlagsMods extends XposedModPack {
 
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
-/*		ReflectedClass DeviceConfigClass = ReflectedClass.of("android.provider.DeviceConfig");
 
-		hookAllMethods(DeviceConfigClass, "getBoolean", new XC_MethodHook() {
-			@Override
-			protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-				if(param.args[0].equals(NAMESPACE_SYSTEMUI) && param.args[1].equals(CLIPBOARD_OVERLAY_SHOW_ACTIONS))
-				{
-					param.setResult(EnableClipboardSmartActions);
-				}
-			}
-		});*/
 		//replaced with this:
 		ReflectedClass ClipboardOverlayControllerClass = ReflectedClass.of("com.android.systemui.clipboardoverlay.ClipboardOverlayController");
 
@@ -83,3 +72,4 @@ public class FeatureFlagsMods extends XposedModPack {
 				});
 	}
 }
+

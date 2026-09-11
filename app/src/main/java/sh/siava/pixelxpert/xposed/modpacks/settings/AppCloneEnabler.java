@@ -57,15 +57,7 @@ public class AppCloneEnabler extends XposedModPack {
 					}
 				});
 
-		/* Private Space
-		ReflectedClass FlagsClass = ReflectedClass.of("android.os.Flags");
-
-		hookAllMethods(FlagsClass, "allowPrivateProfile", new XC_MethodHook() {
-			@Override
-			protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-				param.setResult(true);
-			}
-		});*/
+		
 
 		AppStateClonedAppsBridgeClass
 				.afterConstruction()

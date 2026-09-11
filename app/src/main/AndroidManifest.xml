@@ -15,6 +15,7 @@
 		android:forceQueryable="true"
 		android:icon="@mipmap/ic_launcher"
 		android:label="Pixel Xpert"
+		android:description="@string/xposed_desc"
 		android:supportsRtl="true"
 		android:theme="@style/AppTheme.PixelXpert">
 		<activity
