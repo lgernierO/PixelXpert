@@ -1,7 +1,6 @@
 package sh.siava.pixelxpert.xposed.modpacks.android;
 
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
-import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getLongField;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.setObjectField;
 
@@ -126,17 +125,18 @@ public class NeverScreenOff extends XposedModPack {
 				});
 
 		// CANARY's ProtectedSelectorWithWidgetPreference.onClick() requires a lock-screen
-		// verification whenever the chosen timeout is larger than the current one. The
-		// "Never" sentinel is always larger than any normal option and the auth flag is
-		// reset on every page entry, so picking "Never" would prompt verification every
-		// single time. Skip that prompt only for the "Never" option.
+		// verification whenever the chosen timeout is larger than the currently applied
+		// one, and the auth flag is reset on every page entry (onStart). With "Never"
+		// in the list users switch between options far more often, and every upward
+		// switch (including back to "Never") triggers the prompt - perceived as random
+		// verification chaos. While the feature is enabled, skip the prompt for ALL
+		// options: the device is already unlocked when Settings is reachable, and the
+		// "Never" option was already exempted on the same grounds.
 		ReflectedClass.of("com.android.settings.display.ScreenTimeoutSettings$ProtectedSelectorWithWidgetPreference")
 				.before("onClick")
 				.run(param -> {
 					if (!neverScreenOffEnabled) return;
 					try {
-						long timeoutMs = getLongField(param.thisObject, "mTimeoutMs");
-						if (timeoutMs != NEVER_TIMEOUT_SENTINEL) return;
 						Object settings = getObjectField(param.thisObject, "mScreenTimeoutSettings");
 						if (settings != null) {
 							setObjectField(settings, "mIsUserAuthenticated", true);
