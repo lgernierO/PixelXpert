@@ -94,6 +94,43 @@ jobs:
           done
           file "$OUT"/*
 
+    - name: Build sqlite3 (NDK, latest from sqlite.org)
+      run: |
+          set -euo pipefail
+          NDK_DIR=""
+          if [ -d "$ANDROID_HOME/ndk" ]; then
+            NDK_DIR=$(ls -d "$ANDROID_HOME/ndk/"* | sort -V | tail -1)
+          fi
+          if [ -z "$NDK_DIR" ]; then
+            echo "NDK not found"
+            exit 1
+          fi
+          TC="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          PAGE=$(curl -fsSL --max-time 60 https://www.sqlite.org/download.html)
+          REL=$(echo "$PAGE" | grep -oP '[0-9]{4}/sqlite-amalgamation-[0-9]+\.zip' | head -1)
+          if [ -z "$REL" ]; then
+            echo "Failed to resolve latest sqlite version"
+            exit 1
+          fi
+          VER=$(echo "$REL" | grep -oP 'sqlite-amalgamation-\K[0-9]+')
+          VMAJ=$((10#$VER / 1000000)); VMID=$(( (10#$VER / 1000) % 1000 )); VMIN=$((10#$VER % 1000))
+          echo "Latest sqlite: $VMAJ.$VMID.$VMIN (https://www.sqlite.org/$REL)"
+          curl -fsSL --max-time 120 -o sqlite-amalgamation.zip "https://www.sqlite.org/$REL"
+          rm -rf sqlite-src && mkdir sqlite-src && cd sqlite-src
+          unzip -q ../sqlite-amalgamation.zip
+          cd sqlite-amalgamation-*
+          $TC/aarch64-linux-android21-clang \
+            -O2 -DSQLITE_THREADSAFE=1 -DHAVE_USLEEP=1 \
+            -DSQLITE_ENABLE_FTS5 -DSQLITE_ENABLE_RTREE \
+            -DSQLITE_ENABLE_JSON1 -DSQLITE_ENABLE_MATH_FUNCTIONS \
+            -DSQLITE_ENABLE_DBSTAT_VTAB -DSQLITE_ENABLE_COLUMN_METADATA \
+            sqlite3.c shell.c -o ../sqlite3 -ldl -lm -lpthread
+          cd ..
+          $TC/llvm-strip --strip-all sqlite3
+          file sqlite3
+          ./sqlite3 --version || true
+          cp -v sqlite3 "$GITHUB_WORKSPACE/MagiskModBase/sqlite3"
+
     - name: Gradle Build
       run: ./gradlew buildCanary -Pchannel=canary
 
