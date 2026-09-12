@@ -1,13 +1,16 @@
 package sh.siava.pixelxpert.xposed.modpacks.android;
 
+import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import android.content.Context;
 
+import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
-import sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import sh.siava.pixelxpert.xposed.annotations.FrameworkModPack;
 import sh.siava.pixelxpert.xposed.annotations.SystemUIModPack;
 import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
@@ -21,6 +24,11 @@ public class BrightnessRange extends XposedModPack {
 	private static boolean mBrightnessRangeEnabled = false;
 	private static boolean mDisableBrightnessCap = false;
 
+	// DPC / ABC instances seen since boot, so a preference toggle applies immediately
+	// without waiting for the display controllers to be re-created.
+	private static final List<WeakReference<Object>> sClampControllers =
+			Collections.synchronizedList(new ArrayList<>());
+
 	public BrightnessRange(Context context) {
 		super(context);
 	}
@@ -33,40 +41,30 @@ public class BrightnessRange extends XposedModPack {
 			mDisableBrightnessCap = Xprefs.getBoolean("DisableBrightnessCap", false);
 			List<Float> BrightnessRange = Xprefs.getSliderValues("BrightnessRange", 100f);
 			if (BrightnessRange.size() == 2) {
-				minimumBrightnessLevel = BrightnessRange.get(0) / 100;
-				maximumBrightnessLevel = BrightnessRange.get(1) / 100;
+				minimumBrightnessLevel = BrightnessRange.get(0) / 100f;
+				maximumBrightnessLevel = BrightnessRange.get(1) / 100f;
 			}
 		} catch (Throwable ignored) {
 		}
-	}
-
-	// 上限：去除亮度限制时为硬件最大 1.0f；否则用滑条上限（默认 1.0f 即不限制）
-	private static float getCapMax() {
-		if (mDisableBrightnessCap) return 1f;
-		if (maximumBrightnessLevel < 1f) return maximumBrightnessLevel;
-		return 1f;
+		applyCapToKnownControllers();
 	}
 
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
-		// DisplayPowerController：手动亮度钳制点（mScreenBrightnessRangeMaximum final 字段）
-		try {
-			ReflectedClass.of("com.android.server.display.DisplayPowerController")
-					.afterConstruction()
-					.run(param -> applyCap(param.thisObject));
-		} catch (Throwable ignored) {
-		}
+		// Android 17 evidence (services.jar disassembly): both DisplayPowerController and
+		// AutomaticBrightnessController clamp brightness with
+		//   BrightnessUtils.constrain(value, mScreenBrightnessRangeMinimum, mScreenBrightnessRangeMaximum)
+		// using those two *fields* - the incoming argument is never re-used, so hooking
+		// clampScreenBrightness before/after cannot lift the ceiling. Rewriting the field is
+		// the only way, and it fixes manual + auto brightness with one mechanism.
+		hookClampController("com.android.server.display.DisplayPowerController");
+		hookClampController("com.android.server.display.AutomaticBrightnessController");
 
-		// AutomaticBrightnessController：自动亮度钳制点（之前漏了这处，导致自动亮度无效）
-		try {
-			ReflectedClass.of("com.android.server.display.AutomaticBrightnessController")
-					.afterConstruction()
-					.run(param -> applyCap(param.thisObject));
-		} catch (Throwable ignored) {
-		}
-
-		// HighBrightnessModeController.getCurrentBrightnessMax：自动亮度下 ABC 算 target 的上限来源
-		// （未允许 HBM 时返回转换点，会压住自动亮度 target，必须一并突破）
+		// In auto-brightness, AutomaticBrightnessController.updateAutoBrightness() derives the
+		// target ceiling from getMaxBrightness() -> HighBrightnessModeController
+		// .getCurrentBrightnessMax(), which returns the HBM transition point (e.g. 0.6) while
+		// HBM is not allowed. Without this the target is already capped before it reaches the
+		// clamp, so lifting the field alone would not make auto-brightness brighter.
 		try {
 			ReflectedClass.of("com.android.server.display.HighBrightnessModeController")
 					.after("getCurrentBrightnessMax")
@@ -76,30 +74,59 @@ public class BrightnessRange extends XposedModPack {
 		} catch (Throwable ignored) {
 		}
 
-		// SystemUI 侧滑条范围：让滑条上限与真实上限一致（字段名 brightnessMin/brightnessMax）
+		// Ceiling reported to SystemUI: DisplayPowerController.getBrightnessInfo() copies
+		// mScreenBrightnessRangeMaximum into BrightnessInfo.brightnessMax *after* construction,
+		// so patch the returned object instead of its constructor.
 		try {
-			ReflectedClass.of("android.hardware.display.BrightnessInfo")
-					.afterConstruction()
+			ReflectedClass.of("com.android.server.display.DisplayPowerController")
+					.after("getBrightnessInfo")
 					.run(param -> {
+						Object brightnessInfo = param.getResult();
+						if (brightnessInfo == null) return;
 						if (mDisableBrightnessCap) {
-							setFloatField(param.thisObject, "brightnessMax", 1f);
+							setFloatField(brightnessInfo, "brightnessMax", 1f);
 						} else if (mBrightnessRangeEnabled) {
-							if (minimumBrightnessLevel > 0f) {
-								setFloatField(param.thisObject, "brightnessMin", minimumBrightnessLevel);
-							}
-							if (maximumBrightnessLevel < 1f) {
-								setFloatField(param.thisObject, "brightnessMax", maximumBrightnessLevel);
-							}
+							if (minimumBrightnessLevel > 0f)
+								setFloatField(brightnessInfo, "brightnessMin", minimumBrightnessLevel);
+							if (maximumBrightnessLevel < 1f)
+								setFloatField(brightnessInfo, "brightnessMax", maximumBrightnessLevel);
 						}
 					});
 		} catch (Throwable ignored) {
 		}
 	}
 
-	// 直接改写 final 亮度范围字段：方法体内部钳制会自动突破，applied 亮度与滑条上限同步生效
-	private static void applyCap(Object controller) {
+	private static void hookClampController(String className) {
 		try {
-			setFloatField(controller, "mScreenBrightnessRangeMaximum", getCapMax());
+			ReflectedClass.of(className)
+					.afterConstruction()
+					.run(param -> {
+						sClampControllers.add(new WeakReference<>(param.thisObject));
+						applyCap(param.thisObject);
+					});
+		} catch (Throwable ignored) {
+		}
+	}
+
+	private static void applyCapToKnownControllers() {
+		synchronized (sClampControllers) {
+			sClampControllers.removeIf(ref -> ref.get() == null);
+			for (WeakReference<Object> ref : sClampControllers) {
+				Object controller = ref.get();
+				if (controller != null) applyCap(controller);
+			}
+		}
+	}
+
+	private static void applyCap(Object controller) {
+		// Both features off must leave the vendor ceiling untouched.
+		if (!mDisableBrightnessCap && !mBrightnessRangeEnabled) return;
+		try {
+			if (mDisableBrightnessCap) {
+				setFloatField(controller, "mScreenBrightnessRangeMaximum", 1f);
+			} else if (maximumBrightnessLevel < 1f) {
+				setFloatField(controller, "mScreenBrightnessRangeMaximum", maximumBrightnessLevel);
+			}
 			if (mBrightnessRangeEnabled && minimumBrightnessLevel > 0f) {
 				setFloatField(controller, "mScreenBrightnessRangeMinimum", minimumBrightnessLevel);
 			}
