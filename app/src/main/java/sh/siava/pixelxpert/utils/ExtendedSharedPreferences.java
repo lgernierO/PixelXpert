@@ -9,6 +9,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 
 import sh.siava.rangesliderpreference.RangeSliderPreference;
 
@@ -30,9 +31,15 @@ public class ExtendedSharedPreferences implements SharedPreferences {
 			mOnSharedPreferenceChangeListeners.forEach(listener -> listener.onSharedPreferenceChanged(sharedPreferences, key));
 		}
 	};
+	//cache the wrappers: every from() call used to register a new listener on the underlying
+	//SharedPreferences without ever unregistering it, so each change was dispatched once per
+	//wrapper created so far (making refreshes redundant and their order unpredictable)
+	private static final Map<SharedPreferences, ExtendedSharedPreferences> INSTANCES =
+			Collections.synchronizedMap(new WeakHashMap<>());
+
 	public static ExtendedSharedPreferences from(SharedPreferences prefs)
 	{
-		return new ExtendedSharedPreferences(prefs);
+		return INSTANCES.computeIfAbsent(prefs, ExtendedSharedPreferences::new);
 	}
 	private ExtendedSharedPreferences(SharedPreferences prefs)
 	{

@@ -21,6 +21,7 @@ import sh.siava.pixelxpert.R;
 import sh.siava.pixelxpert.di.StateManagerEntryPoint;
 import sh.siava.pixelxpert.ui.misc.StateManager;
 import sh.siava.pixelxpert.ui.preferences.MaterialPrimarySwitchPreference;
+import sh.siava.pixelxpert.ui.preferences.MaterialRangeSliderPreference;
 import sh.siava.rangesliderpreference.RangeSliderPreference;
 
 public class PreferenceHelper {
@@ -200,6 +201,31 @@ public class PreferenceHelper {
 			case "DWOpacity":
 			case "DWonAOD":
 				return instance.mPreferences.getBoolean("DWallpaperEnabled", false);
+
+			//battery bar sub-options: hidden as a whole when the main switch is off
+			case "BBOnlyWhileCharging":
+			case "BBOnBottom":
+			case "BBarColorful":
+			case "BBarTransitColors":
+			case "BBOpacity":
+			case "BBarHeight":
+			case "BBSetCentered":
+			case "BBAnimateCharging":
+			case "indicateCharging":
+			case "indicateFastCharging":
+			case "indicatePowerSave":
+			case "batteryWarningRange":
+				return instance.mPreferences.getBoolean("BBarEnabled", false);
+
+			//sleep on flat surface sub-options
+			case "FlatStandbyTime":
+			case "SleepOnFlatRespectWakeLock":
+				return instance.mPreferences.getBoolean("SleepOnFlatScreen", false);
+
+			//Gboard clipboard history sub-options
+			case "GboardClipboardDays":
+			case "GboardClipboardSize":
+				return instance.mPreferences.getBoolean("GboardClipboardHistory", false);
 		}
 		return true;
 	}
@@ -398,8 +424,18 @@ public class PreferenceHelper {
 			preference.setEnabled(isEnabled(key));
 
 			String summary = getSummary(preference.getContext(), key);
-			if (summary != null) {
+			if (summary != null && !summary.contentEquals(String.valueOf(preference.getSummary()))) {
+				//setSummary() alone does not notify the adapter, so an already bound row
+				//would keep showing the stale value until the screen is re-opened
 				preference.setSummary(summary);
+
+				if (preference instanceof MaterialRangeSliderPreference sliderPreference) {
+					//re-binding a slider row while the finger is still on it would interrupt
+					//the drag (most sliders persist continuously), so only update the text
+					sliderPreference.refreshSummaryText(summary);
+				} else {
+					preference.notifyChanged();
+				}
 			}
 
 			//Other special cases
@@ -444,37 +480,39 @@ public class PreferenceHelper {
 	}
 
 	public static void setupAllPreferences(PreferenceGroup group) {
-		for (int i = 0; ; i++) {
+		//iterate on the real count: relying on an exception to end the loop used to silently
+		//skip every remaining preference as soon as a single one failed to refresh
+		for (int i = 0; i < group.getPreferenceCount(); i++) {
+			Preference thisPreference = group.getPreference(i);
 			try {
-				Preference thisPreference = group.getPreference(i);
-
 				if (thisPreference instanceof MaterialPrimarySwitchPreference switchPreference) {
-                    switchPreference.setChecked(instance.mPreferences.getBoolean(switchPreference.getKey(), false));
-				} else if (thisPreference instanceof PreferenceGroup) {
-					setupAllPreferences((PreferenceGroup) thisPreference);
-				}
-				else
-				{
+					//the primary switch also carries visibility/summary state, so setup it first
+					PreferenceHelper.setupPreference(switchPreference);
+					switchPreference.setChecked(instance.mPreferences.getBoolean(switchPreference.getKey(), false));
+				} else if (thisPreference instanceof PreferenceGroup subGroup) {
+					setupAllPreferences(subGroup);
+				} else {
 					PreferenceHelper.setupPreference(thisPreference);
 				}
 			} catch (Throwable ignored) {
-				break;
 			}
 		}
 	}
 
 	public static void setupMainSwitches(PreferenceGroup group) {
-		for (int i = 0; ; i++) {
+		for (int i = 0; i < group.getPreferenceCount(); i++) {
+			Preference thisPreference = group.getPreference(i);
 			try {
-				Preference thisPreference = group.getPreference(i);
-
 				PreferenceHelper.setupPreference(thisPreference);
 
-				if (thisPreference instanceof PreferenceGroup) {
-					setupAllPreferences((PreferenceGroup) thisPreference);
+				if (thisPreference instanceof MaterialPrimarySwitchPreference switchPreference) {
+					switchPreference.setChecked(instance.mPreferences.getBoolean(switchPreference.getKey(), false));
+				}
+
+				if (thisPreference instanceof PreferenceGroup subGroup) {
+					setupAllPreferences(subGroup);
 				}
 			} catch (Throwable ignored) {
-				break;
 			}
 		}
 	}
