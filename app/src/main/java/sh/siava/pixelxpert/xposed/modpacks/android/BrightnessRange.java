@@ -65,16 +65,31 @@ public class BrightnessRange extends XposedModPack {
 		} catch (Throwable ignored) {
 		}
 
-		// SystemUI 侧滑条范围（BrightnessRange 模式）
+		// HighBrightnessModeController.getCurrentBrightnessMax：自动亮度下 ABC 算 target 的上限来源
+		// （未允许 HBM 时返回转换点，会压住自动亮度 target，必须一并突破）
+		try {
+			ReflectedClass.of("com.android.server.display.HighBrightnessModeController")
+					.after("getCurrentBrightnessMax")
+					.run(param -> {
+						if (mDisableBrightnessCap) param.setResult(1f);
+					});
+		} catch (Throwable ignored) {
+		}
+
+		// SystemUI 侧滑条范围：让滑条上限与真实上限一致（字段名 brightnessMin/brightnessMax）
 		try {
 			ReflectedClass.of("android.hardware.display.BrightnessInfo")
 					.afterConstruction()
 					.run(param -> {
-						if (mBrightnessRangeEnabled && minimumBrightnessLevel > 0f) {
-							setFloatField(param.thisObject, "brightnessMinimum", minimumBrightnessLevel);
-						}
-						if (mBrightnessRangeEnabled && maximumBrightnessLevel < 1f) {
-							setFloatField(param.thisObject, "brightnessMaximum", maximumBrightnessLevel);
+						if (mDisableBrightnessCap) {
+							setFloatField(param.thisObject, "brightnessMax", 1f);
+						} else if (mBrightnessRangeEnabled) {
+							if (minimumBrightnessLevel > 0f) {
+								setFloatField(param.thisObject, "brightnessMin", minimumBrightnessLevel);
+							}
+							if (maximumBrightnessLevel < 1f) {
+								setFloatField(param.thisObject, "brightnessMax", maximumBrightnessLevel);
+							}
 						}
 					});
 		} catch (Throwable ignored) {
