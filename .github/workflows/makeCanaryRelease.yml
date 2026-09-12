@@ -128,7 +128,8 @@ jobs:
           cd ..
           $TC/llvm-strip --strip-all sqlite3
           file sqlite3
-          ./sqlite3 --version || true
+          # the built binary is ARM, it cannot run on the x86 runner, so read the version from it
+          strings sqlite3 | grep -m1 -E "[0-9]+\.[0-9]+\.[0-9]+" || true
           cp -v sqlite3 "$GITHUB_WORKSPACE/MagiskModBase/sqlite3"
 
     - name: Gradle Build
