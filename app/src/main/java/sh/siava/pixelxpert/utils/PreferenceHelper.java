@@ -105,7 +105,7 @@ public class PreferenceHelper {
 				boolean critZero = false, warnZero = false;
 				List<Float> BBarLevels = instance.mPreferences.getSliderValues("batteryWarningRange", 0);
 
-				if (!BBarLevels.isEmpty()) {
+				if (BBarLevels.size() > 1) {
 					critZero = BBarLevels.get(0) == 0;
 					warnZero = BBarLevels.get(1) == 0;
 				}
@@ -430,11 +430,9 @@ public class PreferenceHelper {
 				preference.setSummary(summary);
 
 				if (preference instanceof MaterialRangeSliderPreference sliderPreference) {
-					//re-binding a slider row while the finger is still on it would interrupt
-					//the drag (most sliders persist continuously), so only update the text
+					//a slider row must not be re-bound while the finger is still on it (most of
+					//them persist continuously while dragging), so refresh its text in place
 					sliderPreference.refreshSummaryText(summary);
-				} else {
-					preference.notifyChanged();
 				}
 			}
 
