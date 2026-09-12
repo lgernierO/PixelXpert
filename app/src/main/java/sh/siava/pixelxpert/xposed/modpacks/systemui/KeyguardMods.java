@@ -437,8 +437,29 @@ public class KeyguardMods extends XposedModPack {
 				});
 
 		//remove 72-hour strong auth timeout requirement
+		//0x10 = STRONG_AUTH_REQUIRED_AFTER_TIMEOUT, proven by services.jar:
+		//StrongAuthTimeoutAlarmListener.onAlarm() -> const/16 #16 -> requireStrongAuth(flags)
+		//LockPatternUtils$StrongAuthTracker is a CLASS (not interface) on this build, and no
+		//SystemUI class overrides getStrongAuthForUser, so hooking it covers every subclass
+		//(KeyguardUpdateMonitor$StrongAuthTracker and the Android17 Kotlin
+		// com.android.systemui.keyguard.data.repository.StrongAuthTracker, whose
+		// currentUserAuthFlags StateFlow value comes from this same method).
 		ReflectedClass StrongAuthTrackerClass = ReflectedClass.of("com.android.internal.widget.LockPatternUtils$StrongAuthTracker");
 		StrongAuthTrackerClass
+				.after("getStrongAuthForUser")
+				.run(param -> {
+					if (DisableStrongAuthTimeout) {
+						param.setResult(((int) param.getResult()) & ~0x10);
+					}
+				});
+
+		//CANARY SystemUI also has 5 call sites that read the flag through LockPatternUtils
+		//itself (CredentialInteractorImpl.verifyCredential, AuthenticationRepositoryImpl,
+		//GlobalActionsDialogLite, ControlsComponent, KeyguardQuickAffordancesCombinedViewModel).
+		//Those bypass the tracker whenever no tracker was registered (the AOSP impl falls back
+		//to Settings.Secure user_requires_strong_auth), so clear the bit there too. Idempotent
+		//when LockPatternUtils delegates to the tracker above.
+		ReflectedClass.of("com.android.internal.widget.LockPatternUtils")
 				.after("getStrongAuthForUser")
 				.run(param -> {
 					if (DisableStrongAuthTimeout) {
