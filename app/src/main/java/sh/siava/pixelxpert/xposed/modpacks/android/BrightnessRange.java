@@ -76,12 +76,18 @@ public class BrightnessRange extends XposedModPack {
 		}
 
 		try { //framework: Android 17 - the REAL cap valve for the built-in display.
-			// DisplayPowerController.clampScreenBrightness and the SystemUI slider range
-			// (BrightnessInfo.brightnessMax) both derive from these two methods:
-			// max = min(HBM limit, NormalBrightnessMode limit or 1.0f)
-			ReflectedClass BrightnessRangeControllerClass = ReflectedClass.of("com.android.server.display.BrightnessRangeController");
+			// Verified against Android 17 smali:
+			// - applied brightness: DPC.updatePowerStateInternal -> clampScreenBrightness()
+			//   constrains value into [HBM.getCurrentBrightnessMin(), HBM.getCurrentBrightnessMax()]
+			// - SystemUI slider max: saveBrightnessInfo() caches brightnessMax =
+			//   min(HBM.getCurrentBrightnessMax(), state.max) -> BrightnessInfo.brightnessMaximum
+			// - HBM.getCurrentBrightnessMax() returns the HBM transitionPoint (cap) when
+			//   HBM is currently not allowed, else the device max (1.0f)
+			// NOTE: thermal / max-lux / low-power / dim modifiers run in BrightnessClamperController
+			// independently of this path, so they keep working (by design).
+			ReflectedClass HighBrightnessModeControllerClass = ReflectedClass.of("com.android.server.display.HighBrightnessModeController");
 
-			BrightnessRangeControllerClass
+			HighBrightnessModeControllerClass
 					.after("getCurrentBrightnessMax")
 					.run(param -> {
 						if (disableBrightnessCap) {
@@ -91,7 +97,7 @@ public class BrightnessRange extends XposedModPack {
 						}
 					});
 
-			BrightnessRangeControllerClass
+			HighBrightnessModeControllerClass
 					.after("getCurrentBrightnessMin")
 					.run(param -> {
 						if (minimumBrightnessLevel > 0f) {
