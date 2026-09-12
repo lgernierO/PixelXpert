@@ -21,7 +21,6 @@ import sh.siava.pixelxpert.R;
 import sh.siava.pixelxpert.di.StateManagerEntryPoint;
 import sh.siava.pixelxpert.ui.misc.StateManager;
 import sh.siava.pixelxpert.ui.preferences.MaterialPrimarySwitchPreference;
-import sh.siava.pixelxpert.ui.preferences.MaterialRangeSliderPreference;
 import sh.siava.rangesliderpreference.RangeSliderPreference;
 
 public class PreferenceHelper {
@@ -334,10 +333,7 @@ public class PreferenceHelper {
 				return (QQSRows == 2) ? fragmentCompat.getString(R.string.word_default) : String.valueOf(QQSRows);
 
 			case "QSColQty":
-				int QSColQty = instance.mPreferences.getSliderInt("QSColQty", 4);
-				if (QSColQty < 2) {
-					instance.mPreferences.edit().putInt("QSColQty", 2).apply();
-				}
+				int QSColQty = Math.max(2, instance.mPreferences.getSliderInt("QSColQty", 4));
 				return (QSColQty == 4) ? fragmentCompat.getString(R.string.word_default) : String.valueOf(QSColQty);
 
 			case "QSRowQty":
@@ -353,10 +349,7 @@ public class PreferenceHelper {
 				return (QSRowQtyL == 0) ? fragmentCompat.getString(R.string.word_default) : String.valueOf(QSRowQtyL);
 
 			case "QSColQtyL":
-				int QSColQtyL = instance.mPreferences.getSliderInt("QSColQtyL", 8);
-				if (QSColQtyL < 4) {
-					instance.mPreferences.edit().putInt("QSColQtyL", 4).apply();
-				}
+				int QSColQtyL = Math.max(4, instance.mPreferences.getSliderInt("QSColQtyL", 8));
 				return (QSColQtyL == 8) ? fragmentCompat.getString(R.string.word_default) : String.valueOf(QSColQtyL);
 
 			case "QSPulldownPercent":
@@ -394,17 +387,14 @@ public class PreferenceHelper {
 				return instance.mPreferences.getSliderFloat("swipeUpPercentage", 20f) + "%";
 
 			case "appLanguage":
-				boolean default_language_selected = instance.mPreferences.getString("appLanguage", null) != null;
 				String[] languages_names = fragmentCompat.getResources().getStringArray(R.array.languages_names);
 				String[] languages_values = fragmentCompat.getResources().getStringArray(R.array.languages_values);
 
 				int current_language_code_index = Arrays.asList(languages_values).indexOf(instance.mPreferences.getString("appLanguage", fragmentCompat.getResources().getConfiguration().getLocales().get(0).getLanguage()));
 				int selected_language_code_index = current_language_code_index < 0 ? Arrays.asList(languages_values).indexOf("en") : current_language_code_index;
 
-				if (!default_language_selected) {
-					instance.mPreferences.edit().putString("appLanguage", languages_values[selected_language_code_index]).apply();
-				}
-
+				//read-only here: writing during getSummary() would re-enter the preference change
+				//listener that is dispatching this very refresh
 				return Arrays.asList(languages_names).get(selected_language_code_index);
 
 			case "CheckForUpdate":
@@ -424,16 +414,10 @@ public class PreferenceHelper {
 			preference.setEnabled(isEnabled(key));
 
 			String summary = getSummary(preference.getContext(), key);
-			if (summary != null && !summary.contentEquals(String.valueOf(preference.getSummary()))) {
-				//setSummary() alone does not notify the adapter, so an already bound row
-				//would keep showing the stale value until the screen is re-opened
+			//androidx setSummary() already notifies the adapter when the text differs, so a
+			//bound row refreshes in place - no manual notifyChanged() (it is protected anyway)
+			if (summary != null) {
 				preference.setSummary(summary);
-
-				if (preference instanceof MaterialRangeSliderPreference sliderPreference) {
-					//a slider row must not be re-bound while the finger is still on it (most of
-					//them persist continuously while dragging), so refresh its text in place
-					sliderPreference.refreshSummaryText(summary);
-				}
 			}
 
 			//Other special cases
