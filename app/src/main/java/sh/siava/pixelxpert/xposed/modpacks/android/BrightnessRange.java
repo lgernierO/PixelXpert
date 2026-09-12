@@ -75,6 +75,33 @@ public class BrightnessRange extends XposedModPack {
 		} catch (Throwable ignored) {
 		}
 
+		try { //framework: Android 17 - the REAL cap valve for the built-in display.
+			// DisplayPowerController.clampScreenBrightness and the SystemUI slider range
+			// (BrightnessInfo.brightnessMax) both derive from these two methods:
+			// max = min(HBM limit, NormalBrightnessMode limit or 1.0f)
+			ReflectedClass BrightnessRangeControllerClass = ReflectedClass.of("com.android.server.display.BrightnessRangeController");
+
+			BrightnessRangeControllerClass
+					.after("getCurrentBrightnessMax")
+					.run(param -> {
+						if (disableBrightnessCap) {
+							param.setResult(1f);
+						} else if (maximumBrightnessLevel < 1f) {
+							param.setResult(maximumBrightnessLevel);
+						}
+					});
+
+			BrightnessRangeControllerClass
+					.after("getCurrentBrightnessMin")
+					.run(param -> {
+						if (minimumBrightnessLevel > 0f) {
+							param.setResult(minimumBrightnessLevel);
+						}
+					});
+
+		} catch (Throwable ignored) {
+		}
+
 		try { //SystemUI
 			ReflectedClass BrightnessInfoClass = ReflectedClass.of("android.hardware.display.BrightnessInfo");
 
