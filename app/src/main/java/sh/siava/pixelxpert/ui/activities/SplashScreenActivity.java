@@ -15,7 +15,6 @@ import androidx.activity.SystemBarStyle;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
-import java.util.concurrent.CountDownLatch;
 
 import sh.siava.pixelxpert.PixelXpert;
 import sh.siava.pixelxpert.R;
@@ -29,7 +28,7 @@ public class SplashScreenActivity extends BaseActivity {
 	 */
 	String TAG = getClass().getSimpleName();
 	private ActivitySplashScreenBinding mBinding;
-	private final CountDownLatch mRootCheckPassed = new CountDownLatch(1);
+	private final java.util.concurrent.CountDownLatch mRootCheckPassed = new java.util.concurrent.CountDownLatch(1);
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -77,8 +76,8 @@ public class SplashScreenActivity extends BaseActivity {
 					app.tryConnectRootService();
 				}
 
-				boolean preferencesReady = app.mPreferencesInitialized.await(10, java.util.concurrent.TimeUnit.SECONDS);
-				boolean rootServiceReady = app.mRootServiceConnected.await(10, java.util.concurrent.TimeUnit.SECONDS);
+				boolean preferencesReady = app.mPreferencesInitialized.await(10_000);
+				boolean rootServiceReady = app.mRootServiceConnected.await(10_000);
 
 				// Update the UI
 				setCheckUIDone(mBinding.circularRootService.getId(), mBinding.doneRootService.getId(), rootServiceReady);

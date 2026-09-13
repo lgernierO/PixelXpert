@@ -97,9 +97,12 @@ public class SettingsActivity extends BaseActivity implements PreferenceFragment
 		setContentView(binding.getRoot());
 
 		createNotificationChannel();
-		setupNavigation(savedInstanceState);
-
+		//initialize the helper before the navigation graph inflates the first preference
+		//fragment: otherwise the very first updateScreen() runs with a null instance and the
+		//page visibly re-renders once the helper arrives in onResume - the "auto refresh on
+		//cold start" the user sees
 		PreferenceHelper.init();
+		setupNavigation(savedInstanceState);
 
 		if (getIntent() != null) {
 			if (getIntent().getBooleanExtra("updateTapped", false)) {

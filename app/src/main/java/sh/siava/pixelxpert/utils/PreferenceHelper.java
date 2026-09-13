@@ -29,7 +29,11 @@ public class PreferenceHelper {
 	public static PreferenceHelper instance;
 
 	public static void init() {
-		new PreferenceHelper(PixelXpert.get().getDefaultPreferences());
+		//idempotent: the singleton is rebuilt on every call otherwise, and a rebuild swaps the
+		//instance mid-refresh (fragments holding the old reference keep stale state)
+		if (instance == null) {
+			new PreferenceHelper(PixelXpert.get().getDefaultPreferences());
+		}
 	}
 
 	private PreferenceHelper(ExtendedSharedPreferences prefs) {

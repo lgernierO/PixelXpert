@@ -25,8 +25,6 @@ import java.lang.reflect.Field;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import dagger.hilt.android.HiltAndroidApp;
@@ -35,6 +33,7 @@ import io.github.libxposed.service.XposedServiceHelper;
 import sh.siava.pixelxpert.service.RootProvider;
 import sh.siava.pixelxpert.utils.ExtendedSharedPreferences;
 import sh.siava.pixelxpert.utils.PreferenceXMLParser;
+import sh.siava.pixelxpert.utils.StateGate;
 
 @HiltAndroidApp
 public class PixelXpert extends Application {
@@ -48,8 +47,9 @@ public class PixelXpert extends Application {
 	private volatile boolean mCoreRootServiceBound = false;
 	private final AtomicBoolean mRootServiceConnecting = new AtomicBoolean(false);
 	private final AtomicBoolean mPreferenceInitInProgress = new AtomicBoolean(false);
-	public final CountDownLatch mRootServiceConnected = new CountDownLatch(1);
-	public final CountDownLatch mPreferencesInitialized = new CountDownLatch(1);
+	/** resettable readiness gates (the old CountDownLatch(1) fields could never re-arm) */
+	public final StateGate mRootServiceConnected = new StateGate(false);
+	public final StateGate mPreferencesInitialized = new StateGate(false);
 
 	private ServiceConnection mCoreRootServiceConnection;
 	private IRootProviderService mCoreRootService;
@@ -109,33 +109,48 @@ public class PixelXpert extends Application {
 	public void initiatePreferences(boolean resetAll) {
 		if (!mPreferenceInitInProgress.compareAndSet(false, true)) return;
 		CompletableFuture.runAsync(() -> {
+			boolean ok = false;
 			try {
 				ExtendedSharedPreferences preferences = getDefaultPreferences();
 				if(resetAll) preferences.edit().clear().commit();
 
 				boolean initialized = preferences.getBoolean(ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY, false);
 				int schemaVersion = preferences.getInt(ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY, -1);
-				if (!resetAll && initialized && schemaVersion == BuildConfig.VERSION_CODE) return;
 
-				if (initialized) setPrefsValidity(false);
+				if (!resetAll && initialized && schemaVersion == BuildConfig.VERSION_CODE) {
+					//warm relaunch (KSU action button, quick reopen): nothing to build, but the gate
+					//must still be opened - the old code returned silently and left a fresh process
+					//waiting on a gate nobody ever opened
+					ok = true;
+				} else {
+					//closing the gate here keeps the splash from trusting a stale "ready" from an
+					//earlier run, and validity=false mutes UI listeners mid-scan (no partial-state
+					//refresh storm while defaults are being written)
+					mPreferencesInitialized.close();
+					setPrefsValidity(false);
 
-				Class<?> xmlClass = getClassLoader().loadClass(R.xml.class.getName());
-				Field[] prefPages = xmlClass.getFields();
-				for (Field prefPage : prefPages)
-				{
-					//noinspection DataFlowIssue
-					initiatePref((int) prefPage.get(null));
+					Class<?> xmlClass = getClassLoader().loadClass(R.xml.class.getName());
+					Field[] prefPages = xmlClass.getFields();
+					for (Field prefPage : prefPages)
+					{
+						//noinspection DataFlowIssue
+						initiatePref((int) prefPage.get(null));
+					}
+
+					//commit schema version + validity together, then declare readiness
+					preferences.edit()
+							.putInt(ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY, BuildConfig.VERSION_CODE)
+							.putBoolean(ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY, true)
+							.commit();
+					ok = true;
 				}
-
-				preferences.edit()
-						.putInt(ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY, BuildConfig.VERSION_CODE)
-						.putBoolean(ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY, true)
-						.commit();
 			} catch (Throwable t) {
 				Log.e(TAG, "Failed to initialize preferences", t);
 			} finally {
 				mPreferenceInitInProgress.set(false);
-				mPreferencesInitialized.countDown();
+				//only report success when the work actually completed - the old finally-block counted
+				//down even after a failure, letting the splash run with half-initialized prefs
+				if (ok) mPreferencesInitialized.open();
 			}
 		});
 	}
@@ -195,7 +210,7 @@ public class PixelXpert extends Application {
 					mCoreRootServiceBound = true;
 					mCoreRootService = IRootProviderService.Stub.asInterface(service);
 					mRootServiceConnecting.set(false);
-					mRootServiceConnected.countDown();
+					mRootServiceConnected.open();
 				}
 
 				@Override
@@ -203,12 +218,14 @@ public class PixelXpert extends Application {
 					mCoreRootServiceBound = false;
 					mCoreRootService = null;
 					mRootServiceConnecting.set(false);
+					//re-arm the gate: a later reconnect must pass onServiceConnected again
+					mRootServiceConnected.close();
 				}
 			};
 
 			mainThreadHandler.post(() -> RootService.bind(intent, mCoreRootServiceConnection));
 
-			boolean connected = mRootServiceConnected.await(10, TimeUnit.SECONDS);
+			boolean connected = mRootServiceConnected.await(10_000);
 			if (!connected) mRootServiceConnecting.set(false);
 			return connected;
 		} catch (Exception ignored) {
