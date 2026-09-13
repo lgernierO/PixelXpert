@@ -476,6 +476,10 @@ public class PreferenceHelper {
 					PreferenceHelper.setupPreference(switchPreference);
 					switchPreference.setChecked(instance.mPreferences.getBoolean(switchPreference.getKey(), false));
 				} else if (thisPreference instanceof PreferenceGroup subGroup) {
+					//the group itself can carry visibility state (a keyed PreferenceCategory is a whole
+					//section that has to disappear with its master switch), and nested groups are never
+					//touched by setupMainSwitches - only recurse after the container is up to date
+					if (subGroup.getKey() != null) setupPreference(subGroup);
 					setupAllPreferences(subGroup);
 				} else {
 					PreferenceHelper.setupPreference(thisPreference);

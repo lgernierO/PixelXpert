@@ -40,6 +40,13 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 		updateScreen(key);
 		checkIfRequiresSystemUIRestart(getContext(), key);
 	};
+	//a reset/import pass rewrites every value while UI listeners are muted (to avoid one full
+	//repaint per key), so the page has to be refreshed once when that pass publishes
+	private final Runnable prefsReadyListener = () -> {
+		//the callback is posted from a worker thread's completion, so the fragment may already be
+		//gone or mid-teardown when it lands
+		if (isAdded() && getPreferenceScreen() != null) updateScreen(null);
+	};
 	private static boolean firstAppLaunch = true;
 	protected StateManager stateManager;
 
@@ -162,6 +169,7 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 		mPreferences = PixelXpert.get().getDefaultPreferences();
 
 		mPreferences.registerOnSharedPreferenceChangeListener(changeListener);
+		PixelXpert.get().addOnPrefsReadyListener(prefsReadyListener);
 
 		updateScreen(null);
 
@@ -173,6 +181,7 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 		if (mPreferences != null) {
 			mPreferences.unregisterOnSharedPreferenceChangeListener(changeListener);
 		}
+		PixelXpert.get().removeOnPrefsReadyListener(prefsReadyListener);
 		super.onDestroy();
 	}
 

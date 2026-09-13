@@ -57,6 +57,11 @@ public class PixelXpert extends Application {
 	/** resettable readiness gates (the old CountDownLatch(1) fields could never re-arm) */
 	public final StateGate mRootServiceConnected = new StateGate(false);
 	public final StateGate mPreferencesInitialized = new StateGate(false);
+	//fragments cannot rely on a preference-change notification for "the (re)initialisation pass
+	//finished": the internal validity/schema keys are deliberately filtered out of that dispatch so a
+	//cold start does not repaint the whole page. Reset/import flows still need the refresh, so they
+	//get a dedicated signal instead.
+	private final List<Runnable> mPrefsReadyListeners = new ArrayList<>();
 
 	private ServiceConnection mCoreRootServiceConnection;
 	private IRootProviderService mCoreRootService;
@@ -132,17 +137,20 @@ public class PixelXpert extends Application {
 					Log.e(TAG, "Previous preference pass is stuck, proceeding anyway");
 				mPreferenceInitRunning = true;
 			}
+			boolean prefsRescanned = false;
+			//close the gate before anything else: while a reset pass is in flight the splash must not be
+			//allowed to read a "ready" left over from an earlier run
+			mPreferencesInitialized.close();
 			try {
 				ExtendedSharedPreferences preferences = getDefaultPreferences();
 				boolean initialized = preferences.getBoolean(ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY, false);
 				int schemaVersion = preferences.getInt(ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY, -1);
 
 				if (resetAll || !initialized || schemaVersion != BuildConfig.VERSION_CODE) {
-					//close the gate so the splash cannot trust a stale "ready" from an earlier run, and
 					//mute UI listeners before the first write: clear() plus every default stored below
 					//fires a change notification each, and an unmuted pass would push a full
 					//updateScreen() through the open fragment per key
-					mPreferencesInitialized.close();
+					prefsRescanned = true;
 					setPrefsValidity(false);
 					if (resetAll) preferences.edit().clear().commit();
 
@@ -171,6 +179,18 @@ public class PixelXpert extends Application {
 				//out over a missing default; the schema version was not persisted in that case, so the
 				//next cold start still re-scans
 				mPreferencesInitialized.open();
+				//only a pass that really rewrote values leaves the visible page stale. A warm start
+				//skips the scan entirely, so notifying there would re-create the "auto refresh on cold
+				//start" this whole pass is meant to avoid
+				if (prefsRescanned) {
+					List<Runnable> readyListeners;
+					synchronized (mPrefsReadyListeners) {
+						readyListeners = new ArrayList<>(mPrefsReadyListeners);
+					}
+					for (Runnable listener : readyListeners) {
+						mainThreadHandler.post(listener);
+					}
+				}
 				//released last: no new pass may start publishing until this one is fully done
 				synchronized (mPrefPassLock) {
 					mPreferenceInitRunning = false;
@@ -192,6 +212,22 @@ public class PixelXpert extends Application {
 			PreferenceXMLParser.setDefaultsFromXml(this, resID, getDefaultPreferences());
 		}
 		catch (Throwable ignored){}
+	}
+
+	/**
+	 * Subscribe to "a preference initialisation pass has published". Fired on the main thread after
+	 * every reset/import/first-run pass, which is when a visible page is guaranteed to be stale.
+	 */
+	public void addOnPrefsReadyListener(Runnable listener) {
+		synchronized (mPrefsReadyListeners) {
+			if (!mPrefsReadyListeners.contains(listener)) mPrefsReadyListeners.add(listener);
+		}
+	}
+
+	public void removeOnPrefsReadyListener(Runnable listener) {
+		synchronized (mPrefsReadyListeners) {
+			mPrefsReadyListeners.remove(listener);
+		}
 	}
 
 	/** @noinspection unused*/
