@@ -1,6 +1,7 @@
 package sh.siava.pixelxpert.xposed.utils;
 
 import static sh.siava.pixelxpert.utils.ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY;
+import static sh.siava.pixelxpert.utils.ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY;
 
 import android.content.Context;
 
@@ -21,11 +22,19 @@ public class ExtendedRemotePreferences extends RemotePreferences {
 		if(IS_PREFS_INITIATED_KEY.equals(key))
 		{
 			mIsPrefsInitiated = getBoolean(IS_PREFS_INITIATED_KEY, false);
+			return;
 		}
+		if(PREFS_SCHEMA_VERSION_KEY.equals(key)) return;
 
 		if(mIsPrefsInitiated && !mOnSharedPreferenceChangeListeners.isEmpty())
 		{
-			mOnSharedPreferenceChangeListeners.forEach(listener -> listener.onSharedPreferenceChanged(sharedPreferences, key));
+			OnSharedPreferenceChangeListener[] listeners;
+			synchronized (mOnSharedPreferenceChangeListeners) {
+				listeners = mOnSharedPreferenceChangeListeners.toArray(new OnSharedPreferenceChangeListener[0]);
+			}
+			for (OnSharedPreferenceChangeListener registeredListener : listeners) {
+				registeredListener.onSharedPreferenceChanged(sharedPreferences, key);
+			}
 		}
 	};
 	private boolean mListenerRegistered = false;
@@ -67,7 +76,9 @@ public class ExtendedRemotePreferences extends RemotePreferences {
 		if(!mListenerRegistered)
 			initListener();
 
-		mOnSharedPreferenceChangeListeners.add(listener);
+		if (!mOnSharedPreferenceChangeListeners.contains(listener)) {
+			mOnSharedPreferenceChangeListeners.add(listener);
+		}
 	}
 
 	@Override

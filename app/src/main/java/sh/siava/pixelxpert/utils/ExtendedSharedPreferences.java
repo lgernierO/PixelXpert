@@ -15,6 +15,7 @@ import sh.siava.rangesliderpreference.RangeSliderPreference;
 
 public class ExtendedSharedPreferences implements SharedPreferences {
 	public static final String IS_PREFS_INITIATED_KEY = "IsPrefsInitiated";
+	public static final String PREFS_SCHEMA_VERSION_KEY = "PreferencesSchemaVersion";
 	private final SharedPreferences prefs;
 	public List<OnSharedPreferenceChangeListener> mOnSharedPreferenceChangeListeners = Collections.synchronizedList(new ArrayList<>());
 	boolean mIsPrefsInitiated;
@@ -24,11 +25,19 @@ public class ExtendedSharedPreferences implements SharedPreferences {
 		if(IS_PREFS_INITIATED_KEY.equals(key))
 		{
 			mIsPrefsInitiated = getBoolean(IS_PREFS_INITIATED_KEY, false);
+			return;
 		}
+		if(PREFS_SCHEMA_VERSION_KEY.equals(key)) return;
 
 		if(mIsPrefsInitiated && !mOnSharedPreferenceChangeListeners.isEmpty())
 		{
-			mOnSharedPreferenceChangeListeners.forEach(listener -> listener.onSharedPreferenceChanged(sharedPreferences, key));
+			OnSharedPreferenceChangeListener[] listeners;
+			synchronized (mOnSharedPreferenceChangeListeners) {
+				listeners = mOnSharedPreferenceChangeListeners.toArray(new OnSharedPreferenceChangeListener[0]);
+			}
+			for (OnSharedPreferenceChangeListener registeredListener : listeners) {
+				registeredListener.onSharedPreferenceChanged(sharedPreferences, key);
+			}
 		}
 	};
 	//cache the wrappers: every from() call used to register a new listener on the underlying
@@ -113,7 +122,9 @@ public class ExtendedSharedPreferences implements SharedPreferences {
 
 	@Override
 	public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener listener) {
-		mOnSharedPreferenceChangeListeners.add(listener);
+		if (!mOnSharedPreferenceChangeListeners.contains(listener)) {
+			mOnSharedPreferenceChangeListeners.add(listener);
+		}
 	}
 
 	@Override

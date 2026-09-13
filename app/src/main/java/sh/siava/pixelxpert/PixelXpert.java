@@ -1,8 +1,6 @@
 package sh.siava.pixelxpert;
 
-import static sh.siava.pixelxpert.utils.AppUtils.restartSelf;
 import static sh.siava.pixelxpert.Constants.DEFAULT_PREFS_FILE_NAME;
-import static sh.siava.pixelxpert.Constants.LAUNCH_REASON_XPOSED_SERVICE_FAIL;
 
 import android.annotation.SuppressLint;
 import android.app.Application;
@@ -25,9 +23,11 @@ import com.topjohnwu.superuser.ipc.RootService;
 
 import java.lang.reflect.Field;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import dagger.hilt.android.HiltAndroidApp;
 import io.github.libxposed.service.XposedService;
@@ -45,12 +45,17 @@ public class PixelXpert extends Application {
 
 
 	private static PixelXpert instance;
-	private boolean mCoreRootServiceBound = false;
+	private volatile boolean mCoreRootServiceBound = false;
+	private final AtomicBoolean mRootServiceConnecting = new AtomicBoolean(false);
+	private final AtomicBoolean mPreferenceInitInProgress = new AtomicBoolean(false);
 	public final CountDownLatch mRootServiceConnected = new CountDownLatch(1);
+	public final CountDownLatch mPreferencesInitialized = new CountDownLatch(1);
 
 	private ServiceConnection mCoreRootServiceConnection;
 	private IRootProviderService mCoreRootService;
-	private XposedService mXposedService;
+	private volatile XposedService mXposedService;
+	private final Object mXposedServiceLock = new Object();
+	private final List<XposedServiceCallback> mPendingXposedServiceCallbacks = new ArrayList<>();
 
 	public void onCreate() {
 		super.onCreate();
@@ -67,20 +72,29 @@ public class PixelXpert extends Application {
 		tryConnectRootService();
 		DynamicColors.applyToActivitiesIfAvailable(this);
 
-		tryConnectXposedService(service -> {});
+		registerXposedServiceListener();
 	}
 
-	private void tryConnectXposedService(XposedServiceCallback callback) {
+	private void registerXposedServiceListener() {
 		XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
 			@Override
 			public void onServiceBind(@NonNull XposedService service) {
-				mXposedService = service;
-				callback.serviceReady(service);
+				List<XposedServiceCallback> callbacks;
+				synchronized (mXposedServiceLock) {
+					mXposedService = service;
+					callbacks = new ArrayList<>(mPendingXposedServiceCallbacks);
+					mPendingXposedServiceCallbacks.clear();
+				}
+				for (XposedServiceCallback callback : callbacks) {
+					mainThreadHandler.post(() -> callback.serviceReady(service));
+				}
 			}
 
 			@Override
 			public void onServiceDied(@NonNull XposedService service) {
-				mXposedService = null;
+				synchronized (mXposedServiceLock) {
+					mXposedService = null;
+				}
 			}
 		});
 	}
@@ -93,12 +107,17 @@ public class PixelXpert extends Application {
 
 	@SuppressLint("ApplySharedPref")
 	public void initiatePreferences(boolean resetAll) {
+		if (!mPreferenceInitInProgress.compareAndSet(false, true)) return;
 		CompletableFuture.runAsync(() -> {
 			try {
-				if(resetAll)
-					getDefaultPreferences().edit().clear().commit();
+				ExtendedSharedPreferences preferences = getDefaultPreferences();
+				if(resetAll) preferences.edit().clear().commit();
 
-				setPrefsValidity(false);
+				boolean initialized = preferences.getBoolean(ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY, false);
+				int schemaVersion = preferences.getInt(ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY, -1);
+				if (!resetAll && initialized && schemaVersion == BuildConfig.VERSION_CODE) return;
+
+				if (initialized) setPrefsValidity(false);
 
 				Class<?> xmlClass = getClassLoader().loadClass(R.xml.class.getName());
 				Field[] prefPages = xmlClass.getFields();
@@ -108,8 +127,16 @@ public class PixelXpert extends Application {
 					initiatePref((int) prefPage.get(null));
 				}
 
-				setPrefsValidity(true);
-			} catch (Throwable ignored) {}
+				preferences.edit()
+						.putInt(ExtendedSharedPreferences.PREFS_SCHEMA_VERSION_KEY, BuildConfig.VERSION_CODE)
+						.putBoolean(ExtendedSharedPreferences.IS_PREFS_INITIATED_KEY, true)
+						.commit();
+			} catch (Throwable t) {
+				Log.e(TAG, "Failed to initialize preferences", t);
+			} finally {
+				mPreferenceInitInProgress.set(false);
+				mPreferencesInitialized.countDown();
+			}
 		});
 	}
 
@@ -135,7 +162,7 @@ public class PixelXpert extends Application {
 
 	public static PixelXpert get() {
 		if (instance == null) {
-			instance = new PixelXpert();
+			throw new IllegalStateException("PixelXpert Application is not initialized");
 		}
 		return instance;
 	}
@@ -152,11 +179,9 @@ public class PixelXpert extends Application {
 
 	public void tryConnectRootService()
 	{
+		if (mCoreRootServiceBound || !mRootServiceConnecting.compareAndSet(false, true)) return;
 		new Thread(() -> {
-			for (int i = 0; i < 2; i++) {
-				if (connectRootService())
-					break;
-			}
+			connectRootService();
 		}).start();
 	}
 
@@ -168,53 +193,43 @@ public class PixelXpert extends Application {
 				@Override
 				public void onServiceConnected(ComponentName name, IBinder service) {
 					mCoreRootServiceBound = true;
-					mRootServiceConnected.countDown();
 					mCoreRootService = IRootProviderService.Stub.asInterface(service);
+					mRootServiceConnecting.set(false);
+					mRootServiceConnected.countDown();
 				}
 
 				@Override
 				public void onServiceDisconnected(ComponentName name) {
 					mCoreRootServiceBound = false;
-					mRootServiceConnected.countDown();
+					mCoreRootService = null;
+					mRootServiceConnecting.set(false);
 				}
 			};
 
 			mainThreadHandler.post(() -> RootService.bind(intent, mCoreRootServiceConnection));
 
-			return mRootServiceConnected.await(5, TimeUnit.SECONDS);
+			boolean connected = mRootServiceConnected.await(10, TimeUnit.SECONDS);
+			if (!connected) mRootServiceConnecting.set(false);
+			return connected;
 		} catch (Exception ignored) {
+			mRootServiceConnecting.set(false);
 			return false;
 		}
 	}
 
 	public void getXposedService(XposedServiceCallback callback, boolean restartOnFail)
 	{
-		new Thread(() -> {
-			int counter = 0;
-			//we give it 1 second to bind to service. Otherwise, we'll FC
-			while (mXposedService == null && counter < 5)
-			{
-				counter++;
-				try {
-					//noinspection BusyWait
-					Thread.sleep(200);
-				} catch (InterruptedException ignored) {}
+		XposedService service;
+		synchronized (mXposedServiceLock) {
+			service = mXposedService;
+			if (service == null && !mPendingXposedServiceCallbacks.contains(callback)) {
+				mPendingXposedServiceCallbacks.add(callback);
 			}
-			if(mXposedService != null) {
-				callback.serviceReady(mXposedService);
-			}
-			else
-			{
-				//Xposed Service can't be bound because of a bug of on their side. FC will fix it
-				if(restartOnFail) {
-					restartSelf(LAUNCH_REASON_XPOSED_SERVICE_FAIL);
-				}
-				else
-				{
-					Log.d(TAG, "getXposedService: didn't get xposed service but won't retry");
-				}
-			}
-		}).start();
+		}
+		if (service != null) {
+			XposedService readyService = service;
+			mainThreadHandler.post(() -> callback.serviceReady(readyService));
+		}
 	}
 
 

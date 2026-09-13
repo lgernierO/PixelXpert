@@ -77,15 +77,16 @@ public class SplashScreenActivity extends BaseActivity {
 					app.tryConnectRootService();
 				}
 
-				app.mRootServiceConnected.await();
+				boolean preferencesReady = app.mPreferencesInitialized.await(10, java.util.concurrent.TimeUnit.SECONDS);
+				boolean rootServiceReady = app.mRootServiceConnected.await(10, java.util.concurrent.TimeUnit.SECONDS);
 
 				// Update the UI
-				setCheckUIDone(mBinding.circularRootService.getId(), mBinding.doneRootService.getId(), app.mRootServiceConnected.getCount() == 0);
+				setCheckUIDone(mBinding.circularRootService.getId(), mBinding.doneRootService.getId(), rootServiceReady);
 
 				// This is just for aesthetics: I don't want the splashscreen to be too fast
 				Thread.sleep(1000);
 
-				if (app.mRootServiceConnected.getCount() == 0) {
+				if (preferencesReady && rootServiceReady) {
 					// Start the main activity
 					Intent intent = new Intent(SplashScreenActivity.this, SettingsActivity.class);
 					Bundle extras = receivedIntent.getExtras();
