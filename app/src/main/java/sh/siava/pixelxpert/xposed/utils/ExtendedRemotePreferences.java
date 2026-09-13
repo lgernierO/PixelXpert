@@ -7,6 +7,8 @@ import android.content.Context;
 
 import com.crossbowffs.remotepreferences.RemotePreferences;
 
+import sh.siava.pixelxpert.utils.PreferenceXMLParser;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -25,6 +27,7 @@ public class ExtendedRemotePreferences extends RemotePreferences {
 			return;
 		}
 		if(PREFS_SCHEMA_VERSION_KEY.equals(key)) return;
+		if(PreferenceXMLParser.KEY_HAS_SET_DEFAULT_VALUES.equals(key)) return;
 
 		if(mIsPrefsInitiated && !mOnSharedPreferenceChangeListeners.isEmpty())
 		{

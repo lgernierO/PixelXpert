@@ -28,6 +28,8 @@ public class ExtendedSharedPreferences implements SharedPreferences {
 			return;
 		}
 		if(PREFS_SCHEMA_VERSION_KEY.equals(key)) return;
+		//androidx bookkeeping flag written by PreferenceXMLParser - never a real setting
+		if(PreferenceXMLParser.KEY_HAS_SET_DEFAULT_VALUES.equals(key)) return;
 
 		if(mIsPrefsInitiated && !mOnSharedPreferenceChangeListeners.isEmpty())
 		{
