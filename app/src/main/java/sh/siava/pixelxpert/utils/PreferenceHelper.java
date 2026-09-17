@@ -507,4 +507,37 @@ public class PreferenceHelper {
 		}
 	}
 
+	/** depth-first search for the preference carrying {@code key} inside {@code root}'s subtree */
+	public static Preference findPreference(PreferenceGroup root, String key) {
+		for (int i = 0; i < root.getPreferenceCount(); i++) {
+			Preference child = root.getPreference(i);
+			if (key.equals(child.getKey())) return child;
+			if (child instanceof PreferenceGroup subGroup) {
+				Preference found = findPreference(subGroup, key);
+				if (found != null) return found;
+			}
+		}
+		return null;
+	}
+
+	/** refreshes every preference inside {@code group} one level deep, recursing into subgroups
+	 * so sub-options in nested PreferenceCategories also pick up their new visibility state */
+	public static void setupChildren(PreferenceGroup group) {
+		for (int i = 0; i < group.getPreferenceCount(); i++) {
+			Preference thisPreference = group.getPreference(i);
+			try {
+				if (thisPreference instanceof MaterialPrimarySwitchPreference switchPreference) {
+					PreferenceHelper.setupPreference(switchPreference);
+					switchPreference.setChecked(instance.mPreferences.getBoolean(switchPreference.getKey(), false));
+				} else {
+					PreferenceHelper.setupPreference(thisPreference);
+				}
+				if (thisPreference instanceof PreferenceGroup subGroup) {
+					setupAllPreferences(subGroup);
+				}
+			} catch (Throwable ignored) {
+			}
+		}
+	}
+
 }

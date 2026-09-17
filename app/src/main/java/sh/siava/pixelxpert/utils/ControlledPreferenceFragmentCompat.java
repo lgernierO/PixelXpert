@@ -18,6 +18,8 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.preference.Preference;
+import androidx.preference.PreferenceGroup;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceScreen;
 import androidx.recyclerview.widget.RecyclerView;
@@ -32,6 +34,7 @@ import sh.siava.pixelxpert.PixelXpert;
 import sh.siava.pixelxpert.R;
 import sh.siava.pixelxpert.di.StateManagerEntryPoint;
 import sh.siava.pixelxpert.ui.misc.StateManager;
+import sh.siava.pixelxpert.ui.preferences.MaterialPrimarySwitchPreference;
 
 public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragmentCompat {
 
@@ -186,7 +189,22 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 	}
 
 	public void updateScreen(String key) {
-		PreferenceHelper.setupAllPreferences(this.getPreferenceScreen());
+		if (key == null || getPreferenceScreen() == null) {
+			//full pass: initial bind or a reset/import that rewrote everything
+			PreferenceHelper.setupAllPreferences(this.getPreferenceScreen());
+			return;
+		}
+		//targeted refresh: only the changed preference (plus its direct children when it is a
+		//master switch) needs re-evaluating. Walking the whole screen from a change listener
+		//made androidx notifyHierarchyChanged() rebind every visible row on each slider tick -
+		//visible as a flicker when a parent switch toggles, and it re-binds the slider row
+		//mid-drag so its summary lagged behind the thumb
+		Preference changed = PreferenceHelper.findPreference(getPreferenceScreen(), key);
+		if (changed == null) return;
+		PreferenceHelper.setupPreference(changed);
+		if (changed instanceof MaterialPrimarySwitchPreference) {
+			PreferenceHelper.setupChildren(getPreferenceScreen());
+		}
 	}
 
 	@Override
@@ -195,3 +213,4 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 		PreferenceHelper.setupMainSwitches(this.getPreferenceScreen());
 	}
 }
+
