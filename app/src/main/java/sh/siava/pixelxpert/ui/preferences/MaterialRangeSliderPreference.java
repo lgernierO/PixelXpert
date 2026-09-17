@@ -7,6 +7,7 @@ import android.content.Context;
 import android.util.AttributeSet;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.preference.PreferenceViewHolder;
 
 import sh.siava.pixelxpert.R;
@@ -18,6 +19,22 @@ public class MaterialRangeSliderPreference extends RangeSliderPreference {
 		super(context, attrs);
 		initResource();
 	}
+
+	/**
+	 * Return null so that PreferenceHelper.setupPreference() skips setSummary(),
+	 * which would otherwise trigger notifyChanged() -> full item rebind on every
+	 * onPreferenceChange callback (fires on every drag tick with
+	 * updatesContinuously="true"). The rebind resets the slider to the last
+	 * persisted value, causing the visible stutter / out-of-sync label.
+	 * The value shown next to the slider (R.id.seekbar_value) is already
+	 * updated live by RangeSliderPreference's own OnSliderTouchListener.
+	 */
+	@Override
+	@SuppressWarnings("unused")
+	public CharSequence getSummary() {
+		return null;
+	}
+
 	@Override
 	public void onBindViewHolder(@NonNull PreferenceViewHolder holder)
 	{
