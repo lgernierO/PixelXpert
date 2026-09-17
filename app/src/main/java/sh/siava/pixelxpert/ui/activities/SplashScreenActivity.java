@@ -46,7 +46,15 @@ public class SplashScreenActivity extends BaseActivity {
 
 		// Root permission check
 		new Thread(() -> {
-			if (PixelXpert.get().hasRootAccess()) {
+			//libsu throws (unchecked) when no su binary exists at all; without this guard the
+			//thread would die with the latch uncounted, leaving the splash frozen with no dialog
+			boolean hasRoot;
+			try {
+				hasRoot = PixelXpert.get().hasRootAccess();
+			} catch (Throwable ignored) {
+				hasRoot = false;
+			}
+			if (hasRoot) {
 				mRootCheckPassed.countDown();
 			} else {
 				if (!getIntent().hasExtra("FromKSU")) {
