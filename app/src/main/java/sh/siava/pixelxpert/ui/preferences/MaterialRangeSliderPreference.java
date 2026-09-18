@@ -31,21 +31,6 @@ public class MaterialRangeSliderPreference extends RangeSliderPreference {
 		initResource();
 	}
 
-	/**
-	 * Return null so that PreferenceHelper.setupPreference() skips setSummary(),
-	 * which would otherwise trigger notifyChanged() -> full item rebind on every
-	 * onPreferenceChange callback (fires on every drag tick with
-	 * updatesContinuously="true"). The rebind resets the slider to the last
-	 * persisted value, causing the visible stutter / out-of-sync label.
-	 * The value shown next to the slider (R.id.seekbar_value) is already
-	 * updated live by RangeSliderPreference's own OnSliderTouchListener.
-	 */
-	@Override
-	@SuppressWarnings("unused")
-	public CharSequence getSummary() {
-		return null;
-	}
-
 	@Override
 	public void onBindViewHolder(@NonNull PreferenceViewHolder holder)
 	{
