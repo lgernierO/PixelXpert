@@ -43,6 +43,12 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 	private final OnSharedPreferenceChangeListener changeListener = (sharedPreferences, key) -> {
 		updateScreen(key);
 		checkIfRequiresSystemUIRestart(getContext(), key);
+
+		// Notify QS tile services so tiles reflect the change immediately
+		// instead of only after the user exits and re-enters the panel
+		if ("SleepOnFlatScreen".equals(key)) {
+			SleepOnSurfaceTileService.onPrefsChanged();
+		}
 	};
 	//a reset/import pass rewrites every value while UI listeners are muted (to avoid one full
 	//repaint per key), so the page has to be refreshed once when that pass publishes
