@@ -15,6 +15,17 @@ import sh.siava.rangesliderpreference.RangeSliderPreference;
 
 public class MaterialRangeSliderPreference extends RangeSliderPreference {
 
+	/**
+	 * Return null so that PreferenceHelper.setupPreference() skips setSummary().
+	 * setSummary() triggers notifyChanged() → onBindViewHolder rebind,
+	 * which resets the slider to the last saved value while dragging.
+	 * The value display is updated by the slider's own touch listener.
+	 */
+	@Override
+	public CharSequence getSummary() {
+		return null;
+	}
+
 	public MaterialRangeSliderPreference(Context context, AttributeSet attrs) {
 		super(context, attrs);
 		initResource();
