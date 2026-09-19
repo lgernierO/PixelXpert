@@ -227,11 +227,13 @@ public class ScreenGestures extends XposedModPack {
 		TriggerSensorClass
 				.afterConstruction()
 				.run(param -> {
-					if(getObjectField(param.thisObject, "mPulseReason").equals(REASON_SENSOR_TAP))
-					{
-						mDozeTouchTrigger = param.thisObject;
+					try {
+						if (getObjectField(param.thisObject, "mPulseReason").equals(REASON_SENSOR_TAP)) {
+							mDozeTouchTrigger = param.thisObject;
+						}
+					} catch (Throwable ignored) {
+						// mPulseReason can be absent on some builds; never let a ctor hook throw.
 					}
-
 				});
 
 		//double tap detector for screen off AOD disabled sensor
@@ -247,7 +249,12 @@ public class ScreenGestures extends XposedModPack {
 
 					if (doubleTapToWake && ((int) param.args[0]) == REASON_SENSOR_TAP) {
 						if (!mDoubleTap) {
-							callMethod(mDozeTouchTrigger, "updateListening"); //we wasted the event! let's listen again
+							if (mDozeTouchTrigger != null) {
+								//we wasted the event! let's listen again.
+								//mDozeTouchTrigger is captured only via the TriggerSensor ctor hook;
+								//calling updateListening on null here used to NPE on every tap event.
+								callMethod(mDozeTouchTrigger, "updateListening");
+							}
 							mDoubleTap = true;
 							mTimer = new Timer();
 							mTimer.schedule(new TimerTask() {
