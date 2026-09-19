@@ -421,13 +421,17 @@ public class StatusbarGestures extends XposedModPack {
 	 * Chinese-ROM style "tap the status bar to jump back to the top of the
 	 * current app" (MIUI's double-tap counterpart, adapted to a single tap).
 	 * <p>
-	 * Android 17 ships the OEM scroll-to-top pipeline natively - verified in
-	 * this device's framework.jar and services.jar:
-	 * WindowManagerService.dispatchScrollToTop(displayId, taskId, x) locates
-	 * the top-visible app window at x, brings its task forward ("scrollToTop")
-	 * and calls IWindow.dispatchScrollToTop(x), which ViewRootImpl forwards to
-	 * View.onScrollToTop - implemented by AbsListView, ScrollView and
-	 * RecyclerView to smooth-scroll to position 0.
+	 * The CANARY framework ships the scroll-to-top pipeline natively: the
+	 * AIDL family (IWindowManager/IWindow.dispatchScrollToTop with
+	 * ViewRootImpl/View forwarding down to View.onScrollToTop - overridden by
+	 * NestedScrollView and RecyclerView in this build's androidx) plus
+	 * WindowManagerService.dispatchScrollToTop(I) in services.jar. The AIDL
+	 * arity is NOT portable: AOSP CANARY exposes a single-int signature while
+	 * MIUI has no IWindowManager.dispatchScrollToTop at all (HyperOS uses
+	 * IMiuiInputManager.scrollToTop instead - verified: zero matches in its
+	 * framework smali). The call below therefore resolves whichever signature
+	 * exists instead of assuming (displayId, taskId, x), which silently threw
+	 * NoSuchMethodException and left the native path dead.
 	 * <p>
 	 * Reverse-engineered from this device's MIUI framework (HyperOS V816):
 	 * MIUI never uses the AOSP View.onScrollToTop pipeline - its
@@ -457,9 +461,25 @@ public class StatusbarGestures extends XposedModPack {
 			Object windowManagerService = WindowManagerGlobalClass
 					.getMethod("getWindowManagerService")
 					.invoke(null);
-			windowManagerService.getClass()
-					.getMethod("dispatchScrollToTop", int.class, int.class, int.class)
-					.invoke(windowManagerService, Display.DEFAULT_DISPLAY, -1, Math.round(x));
+			Class<?> wmsClass = windowManagerService.getClass();
+			java.lang.reflect.Method target;
+			Object[] args;
+			try {
+				//AOSP CANARY: WMS.dispatchScrollToTop(I) - display id; the tap x
+				//travels via the per-window IWindow.dispatchScrollToTop callback.
+				target = wmsClass.getMethod("dispatchScrollToTop", int.class);
+				args = new Object[]{Display.DEFAULT_DISPLAY};
+			} catch (NoSuchMethodException single) {
+				try {
+					target = wmsClass.getMethod("dispatchScrollToTop", int.class, int.class);
+					args = new Object[]{Display.DEFAULT_DISPLAY, Math.round(x)};
+				} catch (NoSuchMethodException dual) {
+					//OEM variants expose (displayId, taskId, x)
+					target = wmsClass.getMethod("dispatchScrollToTop", int.class, int.class, int.class);
+					args = new Object[]{Display.DEFAULT_DISPLAY, -1, Math.round(x)};
+				}
+			}
+			target.invoke(windowManagerService, args);
 		} catch (Throwable t) {
 					}
 
