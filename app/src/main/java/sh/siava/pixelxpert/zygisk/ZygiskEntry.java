@@ -235,7 +235,10 @@ public class ZygiskEntry {
 				}
 				if (target == null) continue;
 				Class<?>[] p = target.getParameterTypes();
-				target.invoke(view, p.length == 1 ? 0 : new Object[0]);
+				//fullScroll expects a focus direction: View.FOCUS_UP (33). 0 is
+				//neither FOCUS_UP nor FOCUS_DOWN and scrolls nothing at all.
+				int arg = "fullScroll".equals(name) ? View.FOCUS_UP : 0;
+				target.invoke(view, p.length == 1 ? arg : new Object[0]);
 				return;
 			} catch (Throwable ignored) {}
 		}
