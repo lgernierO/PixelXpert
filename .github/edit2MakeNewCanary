@@ -3,3 +3,5 @@ Adaptation branch build trigger for latest SystemUI status bar compatibility cha
 Package manager and physical-button hooks synced with canary for current services.jar.
 Carrier text keeps the native battery-event animation and symmetric resting position.
 Carrier animation uses native parent translation without layout jumps.
+Battery fast-charge detection fixed for CANARY: calculateChargingSpeed takes (current, voltage, Context), Context last.
+Doze tap sensor null-guards: updateListening skipped when trigger not captured; TriggerSensor ctor field read wrapped.
