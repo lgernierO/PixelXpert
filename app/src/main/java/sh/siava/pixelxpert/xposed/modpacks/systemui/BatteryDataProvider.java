@@ -123,7 +123,11 @@ public class BatteryDataProvider extends XposedModPack {
 						int current = batteryIntent.getIntExtra(EXTRA_MAX_CHARGING_CURRENT, -1);
 						int voltage = batteryIntent.getIntExtra(EXTRA_MAX_CHARGING_VOLTAGE, -1);
 
-						mIsFastCharging = callMethod(param.thisObject, "calculateChargingSpeed", current, voltage, mContext).equals(CHARGING_FAST);
+						// A17 CANARY: signature is (Context, int, int) — Context is the FIRST
+						// parameter now; the old build passed it last and crashed with
+						// IllegalArgumentException in BatteryStatus.calculateChargingSpeed.
+						mIsFastCharging = Integer.valueOf(CHARGING_FAST).equals(
+								callMethod(param.thisObject, "calculateChargingSpeed", mContext, current, voltage));
 
 						onBatteryStatusChanged((int) getObjectField(param.thisObject, "status"), (Intent) param.args[0]);
 					}
