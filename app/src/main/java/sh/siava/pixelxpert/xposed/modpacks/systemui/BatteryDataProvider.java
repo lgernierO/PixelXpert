@@ -98,8 +98,19 @@ public class BatteryDataProvider extends XposedModPack {
 					if(FastChargingWattage <= USB_5_WATT)
 						return; //it's default value
 
-					int curr = (int) param.args[0];
-					int volt = (int) param.args[1];
+					// A17 CANARY: signature is (Context, int current, int voltage);
+					// older builds had (int current, int voltage, Context). Read the
+					// two ints by TYPE instead of position so either build works.
+					Integer curr = null;
+					Integer volt = null;
+					for (Object arg : param.args) {
+						if (arg instanceof Integer value) {
+							if (curr == null) curr = value;
+							else if (volt == null) volt = value;
+						}
+					}
+					if (curr == null || volt == null)
+						return;
 
 					if(volt < 0)
 					{
