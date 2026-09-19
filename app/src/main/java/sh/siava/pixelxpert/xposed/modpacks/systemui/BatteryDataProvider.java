@@ -78,6 +78,7 @@ public class BatteryDataProvider extends XposedModPack {
 							|| getBooleanFieldOrDefault(param.thisObject, "mWirelessCharging", false);
 					mPowerSave = getBooleanFieldOrDefault(param.thisObject, "mPowerSave", false);
 					mIsBatteryDefender = getBooleanFieldOrDefault(param.thisObject, "mIsBatteryDefender", false);
+
 					fireBatteryInfoChanged();
 				});
 
@@ -134,14 +135,23 @@ public class BatteryDataProvider extends XposedModPack {
 						int current = batteryIntent.getIntExtra(EXTRA_MAX_CHARGING_CURRENT, -1);
 						int voltage = batteryIntent.getIntExtra(EXTRA_MAX_CHARGING_VOLTAGE, -1);
 
-						// CANARY: calculateChargingSpeed is STATIC with signature
-						// (int current, int voltage, Context) — Context is LAST.
-						// Verified against the CANARY SystemUI dex:
-						// calculateChargingSpeed(IILandroid/content/Context;)I
-						// Passing the Context first crashed with
-						// IllegalArgumentException in BatteryStatus.calculateChargingSpeed.
-						int fast = (int) callMethod(param.thisObject, "calculateChargingSpeed", mContext, current, voltage); mIsFastCharging = fast == CHARGING_FAST; } catch (Throwable tryOldOrder) { try { int fast = (int) callMethod(param.thisObject, "calculateChargingSpeed", current, voltage, mContext); mIsFastCharging = fast == CHARGING_FAST; } catch (Throwable ignored) { mIsFastCharging = false; } } /*OLD_BLOCK mIsFastCharging = Integer.valueOf(CHARGING_FAST).equals(
-								callMethod(param.thisObject, "calculateChargingSpeed", current, voltage, mContext));
+						// CANARY SystemUI: calculateChargingSpeed is STATIC and the
+						// parameter order changed between builds:
+						//   09-08 build: (int current, int voltage, Context) - Context LAST
+						//   09-17 build: (Context, int current, int voltage) - Context FIRST
+						// Try the 09-17 order first, fall back to the 09-08 order, and
+						// degrade gracefully if both fail (never crash SystemUI).
+						try {
+							int fast = (int) callMethod(param.thisObject, "calculateChargingSpeed", mContext, current, voltage);
+							mIsFastCharging = fast == CHARGING_FAST;
+						} catch (Throwable tryOldOrder) {
+							try {
+								int fast = (int) callMethod(param.thisObject, "calculateChargingSpeed", current, voltage, mContext);
+								mIsFastCharging = fast == CHARGING_FAST;
+							} catch (Throwable ignored) {
+								mIsFastCharging = false;
+							}
+						}
 
 						onBatteryStatusChanged((int) getObjectField(param.thisObject, "status"), (Intent) param.args[0]);
 					}
@@ -258,4 +268,3 @@ public class BatteryDataProvider extends XposedModPack {
 		void onBatteryStatusChanged(int batteryStatus, Intent batteryStatusIntent);
 	}
 }
-
