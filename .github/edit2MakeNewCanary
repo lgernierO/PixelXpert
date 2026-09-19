@@ -5,3 +5,4 @@ Carrier text keeps the native battery-event animation and symmetric resting posi
 Carrier animation uses native parent translation without layout jumps.
 Battery fast-charge detection fixed for CANARY: calculateChargingSpeed takes (current, voltage, Context), Context last.
 Doze tap sensor null-guards: updateListening skipped when trigger not captured; TriggerSensor ctor field read wrapped.
+Status-bar tap-to-top: IWindowManager.dispatchScrollToTop resolved by arity (AOSP single-int, OEM 3-int fallback); Zygisk fullScroll uses FOCUS_UP.
