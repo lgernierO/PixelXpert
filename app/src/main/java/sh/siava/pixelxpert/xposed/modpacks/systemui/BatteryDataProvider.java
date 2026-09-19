@@ -140,7 +140,7 @@ public class BatteryDataProvider extends XposedModPack {
 						// calculateChargingSpeed(IILandroid/content/Context;)I
 						// Passing the Context first crashed with
 						// IllegalArgumentException in BatteryStatus.calculateChargingSpeed.
-						mIsFastCharging = Integer.valueOf(CHARGING_FAST).equals(
+						int fast = (int) callMethod(param.thisObject, "calculateChargingSpeed", mContext, current, voltage); mIsFastCharging = fast == CHARGING_FAST; } catch (Throwable tryOldOrder) { try { int fast = (int) callMethod(param.thisObject, "calculateChargingSpeed", current, voltage, mContext); mIsFastCharging = fast == CHARGING_FAST; } catch (Throwable ignored) { mIsFastCharging = false; } } /*OLD_BLOCK mIsFastCharging = Integer.valueOf(CHARGING_FAST).equals(
 								callMethod(param.thisObject, "calculateChargingSpeed", current, voltage, mContext));
 
 						onBatteryStatusChanged((int) getObjectField(param.thisObject, "status"), (Intent) param.args[0]);
