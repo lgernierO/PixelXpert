@@ -29,7 +29,7 @@ public class NlpRedirector extends XposedModPack {
 	private static final String GEOCODER_ACTION = "com.android.location.service.GeocodeProvider";
 
 	private static boolean NlpRedirectEnabled = false;
-	private static String NlpRedirectTarget = "com.xiaomi.metoknlp";
+	private static String NlpRedirectTarget = "com.google.android.gms";
 	private static boolean NlpRedirectGeocoder = true;
 	private static boolean NlpRedirectFused = false;
 
@@ -40,7 +40,7 @@ public class NlpRedirector extends XposedModPack {
 	@Override
 	public void onPreferenceUpdated(String... Key) {
 		NlpRedirectEnabled = Xprefs.getBoolean("NlpRedirectEnabled", false);
-		NlpRedirectTarget = Xprefs.getString("NlpRedirectTarget", "com.xiaomi.metoknlp").trim();
+		NlpRedirectTarget = Xprefs.getString("NlpRedirectTarget", "com.google.android.gms").trim();
 		NlpRedirectGeocoder = Xprefs.getBoolean("NlpRedirectGeocoder", true);
 		NlpRedirectFused = Xprefs.getBoolean("NlpRedirectFused", false);
 	}

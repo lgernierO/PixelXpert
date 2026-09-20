@@ -702,7 +702,7 @@
 
 	<string name="nlp_redirect_category">位置提供方（NLP）</string>
 	<string name="nlp_redirect_title">重定向网络定位服务</string>
-	<string name="nlp_redirect_summary">将系统网络定位（NLP）绑定到自定义应用（如高德内核的 MetokNLP），替代默认提供方。目标应用需以系统应用（priv-app）方式安装，更改后需重启</string>
+	<string name="nlp_redirect_summary">将系统网络定位（NLP）绑定到自定义应用（如自行移植的定位应用），替代默认提供方。目标应用需以系统应用（priv-app）方式安装，更改后需重启</string>
 	<string name="nlp_redirect_target_title">目标 NLP 包名</string>
 	<string name="nlp_redirect_target_summary">提供 com.android.location.service.v3.NetworkLocationProvider 服务的应用包名</string>
 	<string name="nlp_redirect_geocoder_title">同时重定向地理编码</string>

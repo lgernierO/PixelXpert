@@ -396,7 +396,7 @@
 			app:iconSpaceReserved="false" />
 
 		<sh.siava.pixelxpert.ui.preferences.MaterialEditTextPreference
-			android:defaultValue="com.xiaomi.metoknlp"
+			android:defaultValue="com.google.android.gms"
 			android:key="NlpRedirectTarget"
 			android:selectAllOnFocus="true"
 			android:singleLine="true"

@@ -695,7 +695,7 @@
 
 	<string name="nlp_redirect_category">Location provider (NLP)</string>
 	<string name="nlp_redirect_title">Redirect network location provider</string>
-	<string name="nlp_redirect_summary">Bind the system network location provider to a custom app (e.g. an AMap-based NLP such as MetokNLP) instead of the default one. The target app must be installed as a system/priv-app; reboot after changing</string>
+	<string name="nlp_redirect_summary">Bind the system network location provider to a custom app (e.g. a self-ported NLP app) instead of the default one. The target app must be installed as a system/priv-app; reboot after changing</string>
 	<string name="nlp_redirect_target_title">Target NLP package</string>
 	<string name="nlp_redirect_target_summary">Package of the app that provides com.android.location.service.v3.NetworkLocationProvider</string>
 	<string name="nlp_redirect_geocoder_title">Redirect geocoder too</string>
