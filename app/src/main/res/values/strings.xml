@@ -693,4 +693,14 @@
     <string name="pm_uninstall_follow_installer_title">Use installer for uninstall requests</string>
     <string name="pm_uninstaller_target_title">Uninstaller</string>
 
+	<string name="nlp_redirect_category">Location provider (NLP)</string>
+	<string name="nlp_redirect_title">Redirect network location provider</string>
+	<string name="nlp_redirect_summary">Bind the system network location provider to a custom app (e.g. an AMap-based NLP such as MetokNLP) instead of the default one. The target app must be installed as a system/priv-app; reboot after changing</string>
+	<string name="nlp_redirect_target_title">Target NLP package</string>
+	<string name="nlp_redirect_target_summary">Package of the app that provides com.android.location.service.v3.NetworkLocationProvider</string>
+	<string name="nlp_redirect_geocoder_title">Redirect geocoder too</string>
+	<string name="nlp_redirect_geocoder_summary">Also bind the geocoder to the target app. Useful where Google geocoding is unreachable</string>
+	<string name="nlp_redirect_fused_title">Redirect fused provider too</string>
+	<string name="nlp_redirect_fused_summary">Also bind the fused provider to the target app. Only enable if the target app provides a fused location service</string>
+
 </resources>
