@@ -20,6 +20,11 @@ import sh.siava.pixelxpert.xposed.utils.toolkit.Logger;
  * from that package (system apps only). We rebuild the supplier with an explicit
  * package filter, so exactly the requested app is bound instead.
  * The target app must be installed as a system/priv-app.
+ * <p>
+ * The hook is installed synchronously from XPLauncher.initializeSystemServer()
+ * (before PHASE_THIRD_PARTY_APPS_CAN_START), so the redirect decision can no
+ * longer race with asynchronous preference loading: the hook callback waits
+ * (bounded) for preferences before deciding.
  */
 /** @noinspection RedundantThrows*/
 @FrameworkModPack
@@ -30,10 +35,14 @@ public class NlpRedirector extends XposedModPack {
 	private static final String FUSED_ACTION = "com.android.location.service.FusedLocationProvider";
 	private static final String GEOCODER_ACTION = "com.android.location.service.GeocodeProvider";
 
-	private static boolean NlpRedirectEnabled = false;
-	private static String NlpRedirectTarget = "com.google.android.gms";
-	private static boolean NlpRedirectGeocoder = true;
-	private static boolean NlpRedirectFused = false;
+	//decision state, written from prefs and read from the hook callback across threads
+	private static volatile boolean PREFS_READY = false;
+	private static volatile boolean sEnabled = false;
+	private static volatile String sTarget = "com.google.android.gms";
+	private static volatile boolean sGeocoder = true;
+	private static volatile boolean sFused = false;
+
+	private static volatile boolean HOOK_INSTALLED = false;
 
 	public NlpRedirector(Context context) {
 		super(context);
@@ -41,44 +50,100 @@ public class NlpRedirector extends XposedModPack {
 
 	@Override
 	public void onPreferenceUpdated(String... Key) {
-		NlpRedirectEnabled = Xprefs.getBoolean("NlpRedirectEnabled", false);
-		NlpRedirectTarget = Xprefs.getString("NlpRedirectTarget", "com.google.android.gms").trim();
-		NlpRedirectGeocoder = Xprefs.getBoolean("NlpRedirectGeocoder", true);
-		NlpRedirectFused = Xprefs.getBoolean("NlpRedirectFused", false);
+		sEnabled = Xprefs.getBoolean("NlpRedirectEnabled", false);
+		sTarget = Xprefs.getString("NlpRedirectTarget", "com.google.android.gms").trim();
+		sGeocoder = Xprefs.getBoolean("NlpRedirectGeocoder", true);
+		sFused = Xprefs.getBoolean("NlpRedirectFused", false);
+		PREFS_READY = true;
+		//TEMP-LOG
+		Logger.log(TAG + ": prefs updated: enabled=" + sEnabled + " target=" + sTarget
+				+ " geocoder=" + sGeocoder + " fused=" + sFused);
 	}
 
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
+		//TEMP-LOG
+		Logger.log(TAG + ": modpack onPackageLoaded, hookInstalled=" + HOOK_INSTALLED);
+		ensureHookInstalled("modpack-load-fallback");
+	}
+
+	/**
+	 * Called synchronously by XPLauncher.initializeSystemServer() at the earliest
+	 * point of system_server, guaranteeing the hook exists before any provider
+	 * supplier is created (PHASE_THIRD_PARTY_APPS_CAN_START).
+	 */
+	public static void installEarlyHook() {
+		//TEMP-LOG
+		Logger.log(TAG + ": installEarlyHook requested (early sync path)");
+		ensureHookInstalled("early-sync");
+	}
+
+	private static synchronized void ensureHookInstalled(String path) {
+		if (HOOK_INSTALLED) return;
 		try {
 			ReflectedClass Supplier = ReflectedClass.of(SUPPLIER_CLASS);
 
 			Supplier.before("createFromConfig")
 					.run(param -> {
-						if (!NlpRedirectEnabled || NlpRedirectTarget.isEmpty()) return;
-
-						String action = param.getArg(1);
-
-						boolean redirect = NETWORK_ACTION.equals(action)
-								|| (NlpRedirectFused && FUSED_ACTION.equals(action))
-								|| (NlpRedirectGeocoder && GEOCODER_ACTION.equals(action));
-
-						if (!redirect) return;
-
 						try {
-							Logger.log(TAG + ": redirecting " + action + " to " + NlpRedirectTarget);
+							long waitStart = System.currentTimeMillis();
+							boolean ready = waitForPrefs(10_000L);
+							//TEMP-LOG
+							Logger.log(TAG + ": createFromConfig fired: arg0=" + safeType(param.getArg(0))
+									+ " action=" + param.getArg(1)
+									+ " prefsReady=" + ready + " waitedMs=" + (System.currentTimeMillis() - waitStart));
+							if (!ready) {
+								Logger.log(TAG + ": prefs unavailable after timeout, stock supplier proceeds this boot");
+								return;
+							}
+							if (!sEnabled || sTarget.isEmpty()) {
+								//TEMP-LOG
+								Logger.log(TAG + ": redirect disabled or empty target, stock supplier proceeds");
+								return;
+							}
+
+							String action = param.getArg(1);
+
+							boolean redirect = NETWORK_ACTION.equals(action)
+									|| (sFused && FUSED_ACTION.equals(action))
+									|| (sGeocoder && GEOCODER_ACTION.equals(action));
+
+							if (!redirect) return;
+
+							Logger.log(TAG + ": redirecting " + action + " to " + sTarget);
 							//same as createFromConfig, but with an explicit package filter
 							Object redirectedSupplier = Supplier.callStaticMethod("create",
-									param.getArg(0), action, NlpRedirectTarget, null, null);
+									param.getArg(0), action, sTarget, null, null);
 							param.setResult(redirectedSupplier);
 							Logger.log(TAG + ": supplier rebuilt for " + action);
 						} catch (Throwable t) {
 							//let the stock supplier take over, but keep the failure visible for diagnostics
-							Logger.log(TAG + ": redirect failed for " + action + ", falling back to stock supplier", t);
+							Logger.log(TAG + ": redirect failed, falling back to stock supplier", t);
 						}
 					});
-			Logger.log(TAG + ": hooked CurrentUserServiceSupplier.createFromConfig");
+			HOOK_INSTALLED = true;
+			Logger.log(TAG + ": hooked CurrentUserServiceSupplier.createFromConfig (path=" + path + ")");
 		} catch (Throwable t) {
 			Logger.log(TAG + ": failed to hook " + SUPPLIER_CLASS, t);
 		}
+	}
+
+	private static boolean waitForPrefs(long timeoutMs) {
+		if (PREFS_READY) return true;
+		long deadline = System.currentTimeMillis() + timeoutMs;
+		while (System.currentTimeMillis() < deadline) {
+			if (PREFS_READY) return true;
+			try {
+				Thread.sleep(100);
+			} catch (InterruptedException e) {
+				return false;
+			}
+		}
+		return PREFS_READY;
+	}
+
+	//TEMP-LOG helper
+	private static String safeType(Object o) {
+		return o == null ? "null" : o.getClass().getName();
 	}
 }
