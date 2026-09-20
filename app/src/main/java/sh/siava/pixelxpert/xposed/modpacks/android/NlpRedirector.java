@@ -8,6 +8,7 @@ import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.FrameworkModPack;
 import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
+import sh.siava.pixelxpert.xposed.utils.toolkit.Logger;
 
 /**
  * Redirects system location providers (network NLP, optional fused and geocoder)
@@ -23,6 +24,7 @@ import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 /** @noinspection RedundantThrows*/
 @FrameworkModPack
 public class NlpRedirector extends XposedModPack {
+	private static final String TAG = "NlpRedirector";
 	private static final String SUPPLIER_CLASS = "com.android.server.servicewatcher.CurrentUserServiceSupplier";
 	private static final String NETWORK_ACTION = "com.android.location.service.v3.NetworkLocationProvider";
 	private static final String FUSED_ACTION = "com.android.location.service.FusedLocationProvider";
@@ -63,14 +65,20 @@ public class NlpRedirector extends XposedModPack {
 						if (!redirect) return;
 
 						try {
+							Logger.log(TAG + ": redirecting " + action + " to " + NlpRedirectTarget);
 							//same as createFromConfig, but with an explicit package filter
 							Object redirectedSupplier = Supplier.callStaticMethod("create",
 									param.getArg(0), action, NlpRedirectTarget, null, null);
 							param.setResult(redirectedSupplier);
-						} catch (Throwable ignored) {
+							Logger.log(TAG + ": supplier rebuilt for " + action);
+						} catch (Throwable t) {
+							//let the stock supplier take over, but keep the failure visible for diagnostics
+							Logger.log(TAG + ": redirect failed for " + action + ", falling back to stock supplier", t);
 						}
 					});
-		} catch (Throwable ignored) {
+			Logger.log(TAG + ": hooked CurrentUserServiceSupplier.createFromConfig");
+		} catch (Throwable t) {
+			Logger.log(TAG + ": failed to hook " + SUPPLIER_CLASS, t);
 		}
 	}
 }
