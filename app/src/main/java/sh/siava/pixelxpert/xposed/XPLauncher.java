@@ -179,6 +179,14 @@ public class XPLauncher extends XposedModule implements ServiceConnection {
 		mContext = context;
 		moduleResources = mContext.createPackageContext(APPLICATION_ID, CONTEXT_IGNORE_SECURITY)
 				.getResources();
+
+		//TEMP-LOG: deterministic NLP redirect hook, installed synchronously before
+		//PHASE_THIRD_PARTY_APPS_CAN_START so the redirect no longer races with async prefs
+		try {
+			sh.siava.pixelxpert.xposed.modpacks.android.NlpRedirector.installEarlyHook();
+		} catch (Throwable t) {
+			Logger.log("PixelXpert: early NLP hook install failed", t);
+		}
 		XPrefs.init(mContext);
 		loadHookTester(PRParam);
 		CompletableFuture.runAsync(() -> waitForXprefsLoad(PRParam));
