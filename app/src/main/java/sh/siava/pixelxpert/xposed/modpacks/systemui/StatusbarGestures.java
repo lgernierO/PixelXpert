@@ -49,14 +49,16 @@ public class StatusbarGestures extends XposedModPack {
 	private static boolean StatusbarTapScrollTop = false;
 	private MotionEvent mDownEvent;
 	private GestureDetector mSingleTapDetector;
-	/** True once the status-bar window root has delivered this touch sequence. */
-	private boolean mStatusBarEventSeen = false;
+	// 同一物理手势只认首次接受 DOWN 的入口，UP/CANCEL 后释放窗口引用。
+	private View mTapEventSource;
+	private long mTapDownTime = -1L;
+	private int mTapDisplayId = Display.DEFAULT_DISPLAY;
+	private boolean mScrollTopWarningLogged;
 	/** Cached status bar height in px, used to filter shade-window taps down to the bar. */
 	private int mStatusBarHeight = -1;
 	/** The status bar view itself, kept to measure the real strip height. */
 	private View mStatusBarView = null;
-	private long mLastScrollTopTime = 0L;
-	private View mStatusBarWindowView = null;
+	private long mLastScrollTopTime = -SCROLL_TOP_DEBOUNCE_MS;
 	@SuppressLint("StaticFieldLeak")
 	private static StatusbarGestures instance;
 	private Object ShadeInteractorSceneContainerImpl;
@@ -90,12 +92,7 @@ public class StatusbarGestures extends XposedModPack {
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationPanelViewController"); //Pre 17QPR1
-		// Verified against the device's CANARY SystemUI dex: the status bar now
-		// lives inside the shade window. NotificationShadeWindowView (which
-		// overrides dispatchTouchEvent) is the only funnel every status-bar
-		// touch passes through, and it forwards touches to PhoneStatusBarView
-		// itself. StatusBarWindowView exists but sits OUTSIDE the touch path,
-		// so hooking it never fires.
+		// 当前 APK 的 Scene/旧 Shade 根视图均声明 dispatchTouchEvent。
 		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.PhoneStatusBarView");
 		ReflectedClass StatusBarWindowViewClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.window.StatusBarWindowView");
 
@@ -133,149 +130,63 @@ public class StatusbarGestures extends XposedModPack {
 		mSingleTapDetector = new GestureDetector(mContext, new GestureDetector.SimpleOnGestureListener() {
 			@Override
 			public boolean onSingleTapConfirmed(@NonNull MotionEvent e) {
-				if (StatusbarTapScrollTop) {
-						scrollForegroundAppToTop(e.getX());
+				// 确认单击有延迟，执行前重新检查锁屏/面板状态；WMS 需要屏幕坐标。
+				if (StatusbarTapScrollTop && isTapToTopAllowed()) {
+					scrollForegroundAppToTop(e.getRawX());
 				}
 				return false;
 			}
 		});
 
-		// PRIMARY funnel: the framework InputStage. ViewRootImpl$EarlyPostImeInputStage
-		// is a FRAMEWORK class - SystemUI window rebuilds (e.g. the shade window
-		// being recreated when screen recording starts, which detached every
-		// view-level funnel) cannot affect it. processPointerEvent sees every
-		// pointer event of every SystemUI window before view dispatch; the
-		// window root view is resolved per event, so recreation is harmless.
+		// framework.jar 已核实该类及方法存在。必须检查 HookHandle，不能把
+		// “类存在”当作“Hook 注册成功”，否则方法未命中时连备用入口都被关闭。
 		boolean inputStageHooked = false;
 		try {
 			ReflectedClass EarlyPostImeStageClass = ReflectedClass.ofIfPossible("android.view.ViewRootImpl$EarlyPostImeInputStage");
-			if (EarlyPostImeStageClass.getClazz() != null) {
-				inputStageHooked = true;
-				EarlyPostImeStageClass
-						.before("processPointerEvent")
-						.run(param -> {
-							if (!StatusbarTapScrollTop) return;
-							Object queuedInputEvent = param.args[0];
-							if (queuedInputEvent == null) return;
-							Object evObj = getObjectField(queuedInputEvent, "mEvent");
-							if (!(evObj instanceof MotionEvent)) return;
-							MotionEvent event = (MotionEvent) evObj;
-
-							// Only status-bar-related windows (scene root / shade window /
-							// status bar window). Resolved per event from the outer
-							// ViewRootImpl, so a rebuilt window still matches.
-							Object viewRoot = getObjectField(param.thisObject, "this$0");
-							if (viewRoot == null) return;
-							Object rootView;
-							try {
-								rootView = callMethod(viewRoot, "getView");
-							} catch (Throwable ignored) {
-								rootView = getObjectField(viewRoot, "view");
-							}
-							if (rootView == null) return;
-							String rootName = rootView.getClass().getName();
-							if (!(rootName.contains("SceneWindowRootView")
-									|| rootName.contains("NotificationShadeWindowView")
-									|| rootName.contains("StatusBarWindowView"))) return;
-
-							boolean isDown = event.getActionMasked() == MotionEvent.ACTION_DOWN;
-							if (isDown) {
-								// Gate ONCE per gesture: transient shade-expansion residue
-								// during screen recording must not split a sequence by
-								// rejecting its MOVE/UP events (that would swallow the tap).
-								if (!isTapToTopAllowed()) return;
-								if (event.getY() > getStatusBarHeight()) return;
-								mStatusBarEventSeen = false; // new gesture sequence begins
-							} else if (!mStatusBarEventSeen) {
-								return; // stray MOVE/UP with no accepted DOWN
-							}
-							mSingleTapDetector.onTouchEvent(event);
-							mStatusBarEventSeen = true;
-							});
-			}
-		} catch (Throwable t) {
-					}
-
-		if (!inputStageHooked) {
-		// Legacy view-level funnels (pre-InputStage fallback). Skipped when the
-		// framework funnel above is active - feeding the same sequence twice
-		// would make the detector report a double-tap and swallow the tap.
-		// PRIMARY source, verified on-device: this CANARY build renders the
-		// status bar through the scene container, whose window root view is
-		// SceneWindowRootView. The proven double-tap-to-sleep gesture hooks
-		// exactly this method, so it is the only touch funnel guaranteed to
-		// fire. The window root spans the whole screen, so taps are filtered
-		// down to the status-bar strip by Y, and suppressed while the
-		// keyguard/bouncer shows or any shade surface is expanded.
-		ReflectedClass.ofIfPossible("com.android.systemui.scene.ui.view.SceneWindowRootView")
-				.before("dispatchTouchEvent")
-				.run(param -> {
-					if (!StatusbarTapScrollTop) return;
-
-					MotionEvent event = (MotionEvent) param.args[0];
-					boolean isDown = event.getActionMasked() == MotionEvent.ACTION_DOWN;
-					if (isDown) {
-						// Gate ONCE per gesture: transient shade-expansion residue
-						// during screen recording must not split a sequence by
-						// rejecting its MOVE/UP events (that would swallow the tap).
-						if (!isTapToTopAllowed()) return;
-						if (event.getY() > getStatusBarHeight()) return;
-						mStatusBarEventSeen = false; // new gesture sequence begins
-					} else if (mStatusBarEventSeen) {
-						// sequence already accepted: feed MOVE/UP unconditionally
-						mSingleTapDetector.onTouchEvent(event);
-						return;
-					} else {
-						return; // stray MOVE/UP with no accepted DOWN
-					}
-					mSingleTapDetector.onTouchEvent(event);
-					mStatusBarEventSeen = true;
-				});
-
-		// SECONDARY source for builds where the bar still lives inside the
-		// legacy shade window. Guarded by mStatusBarEventSeen so a touch that
-		// already passed through the scene root above is not fed twice (a
-		// duplicate UP would be read as a double-tap and suppress the tap).
-		ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationShadeWindowView")
-				.before("dispatchTouchEvent")
-				.run(param -> {
-					if (!StatusbarTapScrollTop) return;
-					if (mStatusBarEventSeen) return; // scene root already fed this sequence
-
-					MotionEvent event = (MotionEvent) param.args[0];
-					if (event.getY() > getStatusBarHeight()) return;
-
-					if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-						mStatusBarEventSeen = false; // new gesture sequence begins
-					}
-					mSingleTapDetector.onTouchEvent(event);
-					mStatusBarEventSeen = true;
-				});
-
-		// StatusBarWindowView is kept as a secondary source for builds where the
-		// bar window still exists outside the shade window. Its own class does
-		// not declare dispatchTouchEvent (CANARY dex), so the ViewGroup hook is
-		// what actually fires for it.
-		StatusBarWindowViewClass
-				.afterConstruction()
-				.run(param -> mStatusBarWindowView = (View) param.thisObject);
-
-		if (StatusBarWindowViewClass.getClazz() != null) {
-			ReflectedClass.of(ViewGroup.class)
-					.before("dispatchTouchEvent")
+			inputStageHooked = !EarlyPostImeStageClass
+					.before("processPointerEvent")
 					.run(param -> {
-						if (param.thisObject != mStatusBarWindowView) return;
-						if (!StatusbarTapScrollTop) return;
-
-						MotionEvent event = (MotionEvent) param.args[0];
-						if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-							mStatusBarEventSeen = false;
+						try {
+							if (param.args.length == 0 || param.args[0] == null) return;
+							Object event = getObjectField(param.args[0], "mEvent");
+							if (!(event instanceof MotionEvent)) return;
+							Object viewRoot = getObjectField(param.thisObject, "this$0");
+							Object rootView = callMethod(viewRoot, "getView");
+							if (!(rootView instanceof View)) return;
+							String rootName = rootView.getClass().getName();
+							if (!(rootName.equals("com.android.systemui.scene.ui.view.SceneWindowRootView")
+									|| rootName.equals("com.android.systemui.shade.NotificationShadeWindowView")
+									|| rootName.equals("com.android.systemui.statusbar.window.StatusBarWindowView"))) return;
+							onTapToTopTouch((View) rootView, (MotionEvent) event);
+						} catch (Throwable t) {
+							warnScrollTop("状态栏回顶：读取输入事件失败", t);
 						}
-						mSingleTapDetector.onTouchEvent(event);
-						mStatusBarEventSeen = true;
-					});
+					}).isEmpty();
+		} catch (Throwable t) {
+			warnScrollTop("状态栏回顶：主输入 Hook 注册失败，使用视图入口", t);
 		}
-		} // end of legacy view-level funnels
+
+		final boolean useViewTapFallback = !inputStageHooked;
+		if (useViewTapFallback) {
+			ReflectedClass.ofIfPossible("com.android.systemui.scene.ui.view.SceneWindowRootView")
+					.before("dispatchTouchEvent")
+					.run(this::onTapToTopViewEvent);
+			ReflectedClass.ofIfPossible("com.android.systemui.shade.NotificationShadeWindowView")
+					.before("dispatchTouchEvent")
+					.run(this::onTapToTopViewEvent);
+
+			// StatusBarWindowView 继承 ViewGroup 的分发方法；按类型识别当前窗口，
+			// 不保存某次构造的单例，避免窗口重建后仍过滤旧对象。
+			if (StatusBarWindowViewClass.getClazz() != null) {
+				ReflectedClass.of(ViewGroup.class)
+						.before("dispatchTouchEvent")
+						.run(param -> {
+							if (StatusBarWindowViewClass.getClazz().isInstance(param.thisObject)) {
+								onTapToTopViewEvent(param);
+							}
+						});
+			}
+		}
 		// Capture the real status-bar height from the bar view itself, so the
 		// shade-window Y filter tracks the actual strip on every device.
 		PhoneStatusBarViewClass
@@ -285,18 +196,14 @@ public class StatusbarGestures extends XposedModPack {
 					mStatusBarHeight = -1; // re-resolve on first use
 				});
 
-		// Legacy path: when the shade-window funnel above is unavailable (older
-		// builds), PhoneStatusBarView receives the events directly. The
-		// mStatusBarEventSeen guard keeps one physical tap from being fed twice,
-		// which would make the detector report a double-tap and suppress
-		// onSingleTapConfirmed.
+		// PhoneStatusBarView 仅作为备用来源；主入口有效时不再次喂给单击检测器。
 		PhoneStatusBarViewClass
 				.after("dispatchTouchEvent")
 				.run(param -> {
 					MotionEvent event = (MotionEvent) param.args[0];
 
-					if (StatusbarTapScrollTop && !mStatusBarEventSeen) {
-						mSingleTapDetector.onTouchEvent(event);
+					if (useViewTapFallback) {
+						onTapToTopTouch((View) param.thisObject, event);
 					}
 
 					if (!oneFingerPulldownEnabled) return;
@@ -340,6 +247,57 @@ public class StatusbarGestures extends XposedModPack {
 				});
 	}
 
+	private void onTapToTopViewEvent(HookHelper.RunParam param) {
+		if (param.thisObject instanceof View && param.args.length > 0
+				&& param.args[0] instanceof MotionEvent) {
+			onTapToTopTouch((View) param.thisObject, (MotionEvent) param.args[0]);
+		}
+	}
+
+	private void onTapToTopTouch(View source, MotionEvent event) {
+		if (!StatusbarTapScrollTop) {
+			if (mTapEventSource != null) cancelTapToTop(event);
+			return;
+		}
+		int action = event.getActionMasked();
+		if (action == MotionEvent.ACTION_DOWN) {
+			// Scene -> Shade -> Phone 的重复 DOWN 不能覆盖首次入口，也不能重复识别。
+			if (event.getDownTime() == mTapDownTime) return;
+			mTapDownTime = event.getDownTime();
+			mTapEventSource = null;
+			if (!isTapToTopAllowed() || event.getY() < 0 || event.getY() > getStatusBarHeight()) {
+				cancelTapToTop(event);
+				return;
+			}
+			mTapEventSource = source;
+			Display display = source.getDisplay();
+			mTapDisplayId = display != null ? display.getDisplayId() : Display.DEFAULT_DISPLAY;
+		} else if (source != mTapEventSource || event.getDownTime() != mTapDownTime) {
+			return;
+		}
+
+		// DOWN 通过检查后必须继续交付 MOVE/UP，即使下拉已让 shade 开始展开。
+		// 只观察，不 setResult、不改原事件，原生下拉和双击仍走原分发链。
+		mSingleTapDetector.onTouchEvent(event);
+		if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+			mTapEventSource = null;
+		}
+	}
+
+	private void cancelTapToTop(MotionEvent event) {
+		MotionEvent cancel = MotionEvent.obtain(event);
+		cancel.setAction(MotionEvent.ACTION_CANCEL);
+		mSingleTapDetector.onTouchEvent(cancel);
+		cancel.recycle();
+		mTapEventSource = null;
+	}
+
+	private void warnScrollTop(String message, Throwable error) {
+		if (mScrollTopWarningLogged) return;
+		mScrollTopWarningLogged = true;
+		log(message, error);
+	}
+
 	private void onStatusBarLongPress(HookHelper.RunParam param) {
 		if (StatusbarLongpressAppSwitch) {
 			sendAppSwitchBroadcast();
@@ -362,17 +320,15 @@ public class StatusbarGestures extends XposedModPack {
 	 * ScreenGestures uses for its status-bar gestures.
 	 */
 	private boolean isTapToTopAllowed() {
-		if (mShadeInteractorAnyExpanded()) return false;
-		if (mKeyguardInteractor == null) return true;
+		if (mShadeInteractorAnyExpanded() || mKeyguardInteractor == null) return false;
 		try {
 			Object keyguardShowing = callMethod(getObjectField(mKeyguardInteractor, "isKeyguardShowing"), "getValue");
 			Object bouncerShowing = callMethod(getObjectField(mKeyguardInteractor, "primaryBouncerShowing"), "getValue");
-			boolean allowed = keyguardShowing.equals(false) && !bouncerShowing.equals(true);
-			if (!allowed) {
-			}
-			return allowed;
+			return Boolean.FALSE.equals(keyguardShowing) && Boolean.FALSE.equals(bouncerShowing);
 		} catch (Throwable t) {
-						return true;
+			// 状态未知时不向后台应用发送回顶，避免在锁屏/认证界面误触发。
+			warnScrollTop("状态栏回顶：无法读取锁屏状态，已跳过手势", t);
+			return false;
 		}
 	}
 
@@ -418,38 +374,9 @@ public class StatusbarGestures extends XposedModPack {
 	}
 
 	/**
-	 * Chinese-ROM style "tap the status bar to jump back to the top of the
-	 * current app" (MIUI's double-tap counterpart, adapted to a single tap).
-	 * <p>
-	 * The CANARY framework ships the scroll-to-top pipeline natively: the
-	 * AIDL family (IWindowManager/IWindow.dispatchScrollToTop with
-	 * ViewRootImpl/View forwarding down to View.onScrollToTop - overridden by
-	 * NestedScrollView and RecyclerView in this build's androidx) plus
-	 * WindowManagerService.dispatchScrollToTop(I) in services.jar. The AIDL
-	 * arity is NOT portable: AOSP CANARY exposes a single-int signature while
-	 * MIUI has no IWindowManager.dispatchScrollToTop at all (HyperOS uses
-	 * IMiuiInputManager.scrollToTop instead - verified: zero matches in its
-	 * framework smali). The call below therefore resolves whichever signature
-	 * exists instead of assuming (displayId, taskId, x), which silently threw
-	 * NoSuchMethodException and left the native path dead.
-	 * <p>
-	 * Reverse-engineered from this device's MIUI framework (HyperOS V816):
-	 * MIUI never uses the AOSP View.onScrollToTop pipeline - its
-	 * MiuiInputManagerService.scrollToTop() notifies per-window listeners in
-	 * every app process, and those listeners reflectively scroll whatever
-	 * scrollable view they find (RecyclerView, WebView, custom containers -
-	 * views that have no onScrollToTop at all). That is why apps that scroll
-	 * on MIUI stayed dead on the native Pixel path: androidx RecyclerView and
-	 * WebView simply do not implement onScrollToTop.
-	 * <p>
-	 * Pixel adaptation: keep the native WMS dispatchScrollToTop first (it is
-	 * cheap and handles framework widgets), then ALWAYS notify the app-side
-	 * engine (ScrollTopEnabler, same process as the target app) which does
-	 * the MIUI-style reflective scroll - it covers androidx/WebView/custom
-	 * containers and no-ops gracefully when the native path already worked.
-	 * The broadcast targets the module package so only injected processes
-	 * receive it; the receiver enforces no permission (harmless: it only
-	 * scrolls the top of a view tree).
+	 * 提供的 pixel framework 中 IWindowManager/WMS 均为 (displayId, x, taskId)。
+	 * WMS 用第二参命中/换算窗口横坐标，用第三参查询任务；-1 表示不指定任务。
+	 * 不按参数个数猜语义，避免把点击横坐标误当作任务 ID。
 	 */
 	private void scrollForegroundAppToTop(float x) {
 		long now = SystemClock.uptimeMillis();
@@ -457,42 +384,21 @@ public class StatusbarGestures extends XposedModPack {
 		mLastScrollTopTime = now;
 
 		try {
-			Class<?> WindowManagerGlobalClass = Class.forName("android.view.WindowManagerGlobal");
-			Object windowManagerService = WindowManagerGlobalClass
-					.getMethod("getWindowManagerService")
-					.invoke(null);
-			Class<?> wmsClass = windowManagerService.getClass();
-			java.lang.reflect.Method target;
-			Object[] args;
-			try {
-				//AOSP CANARY: WMS.dispatchScrollToTop(I) - display id; the tap x
-				//travels via the per-window IWindow.dispatchScrollToTop callback.
-				target = wmsClass.getMethod("dispatchScrollToTop", int.class);
-				args = new Object[]{Display.DEFAULT_DISPLAY};
-			} catch (NoSuchMethodException single) {
-				try {
-					target = wmsClass.getMethod("dispatchScrollToTop", int.class, int.class);
-					args = new Object[]{Display.DEFAULT_DISPLAY, Math.round(x)};
-				} catch (NoSuchMethodException dual) {
-					//OEM variants expose (displayId, taskId, x)
-					target = wmsClass.getMethod("dispatchScrollToTop", int.class, int.class, int.class);
-					args = new Object[]{Display.DEFAULT_DISPLAY, -1, Math.round(x)};
-				}
-			}
-			target.invoke(windowManagerService, args);
+			Class<?> windowManagerGlobal = Class.forName("android.view.WindowManagerGlobal");
+			Object service = windowManagerGlobal.getMethod("getWindowManagerService").invoke(null);
+			service.getClass().getMethod("dispatchScrollToTop", int.class, int.class, int.class)
+					.invoke(service, mTapDisplayId, Math.round(x), -1);
 		} catch (Throwable t) {
-					}
+			warnScrollTop("状态栏回顶：WMS 分发失败，继续应用侧补偿", t);
+		}
 
-		// App-side MIUI-style engine: reaches views the native path cannot
-		// (androidx RecyclerView, WebView, custom scrollers). Sent regardless
-		// of the outcome above. Mirrors MIUI's design: the request is
-		// announced to every injected process and each receiver decides
-		// whether its window holds input focus - SystemUI cannot know the
-		// foreground package here, so no setPackage targeting.
+		// 保留原有应用侧补偿通知；接收端检查实际窗口焦点，避免多窗口一起滚动。
+		// 该接口返回 void，不反馈窗口是否已滚动，因此两条路径仍保持独立。
 		new Thread(() -> {
 			try {
 				mContext.sendBroadcast(new Intent(Constants.ACTION_SCROLL_TOP));
 			} catch (Throwable t) {
+				warnScrollTop("状态栏回顶：应用侧补偿广播失败", t);
 			}
 		}).start();
 	}
