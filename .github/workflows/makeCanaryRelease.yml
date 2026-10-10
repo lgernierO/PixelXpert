@@ -64,7 +64,23 @@ jobs:
       
     - name: 准备固定版本的 native 工具链
       run: |
-          sdkmanager "ndk;30.0.16248370"
+          set -euo pipefail
+          # sdkmanager is not on PATH on ubuntu-latest; resolve it from the SDK.
+          SDKMANAGER=""
+          for c in \
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "$ANDROID_HOME/tools/bin/sdkmanager"; do
+            if [ -x "$c" ]; then SDKMANAGER="$c"; break; fi
+          done
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER=$(command -v sdkmanager || true)
+          fi
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager not found under ANDROID_HOME/ANDROID_SDK_ROOT"; exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "ndk;30.0.16248370"
           python3 -m venv "$RUNNER_TEMP/pixelxpert-build-tools"
           "$RUNNER_TEMP/pixelxpert-build-tools/bin/pip" install cmake==3.31.6 ninja==1.12.1
           echo "$RUNNER_TEMP/pixelxpert-build-tools/bin" >> "$GITHUB_PATH"
@@ -161,4 +177,3 @@ jobs:
         git commit -m 'Version update: Release'
         git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
         git push origin HEAD:canary
-
