@@ -26,19 +26,16 @@ import android.graphics.Outline;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.hardware.camera2.CameraManager;
-import android.util.TypedValue;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.widget.ImageView;
-import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.constraintlayout.widget.ConstraintSet;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -48,10 +45,10 @@ import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.SystemUIModPack;
 import sh.siava.pixelxpert.xposed.utils.StringFormatter;
+import sh.siava.pixelxpert.xposed.utils.LockscreenCustomText;
 import sh.siava.pixelxpert.xposed.utils.SystemUtils;
 import sh.siava.pixelxpert.xposed.utils.reflection.HookHelper;
 import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
-import sh.siava.pixelxpert.xposed.utils.reflection.ReflectionTools;
 
 @SuppressWarnings("RedundantThrows")
 @SystemUIModPack
@@ -79,9 +76,8 @@ public class KeyguardMods extends XposedModPack {
 
 	final StringFormatter carrierStringFormatter = new StringFormatter();
 	final StringFormatter clockStringFormatter = new StringFormatter();
-	private TextView mComposeKGMiddleCustomTextView;
+	private final LockscreenCustomText middleText;
 	private static String KGMiddleCustomText = "";
-	private ViewGroup mKeyguardRootView;
 	private Object mColorExtractor;
 	private boolean mDozing = false;
 	private boolean mSupportsDarkText = false;
@@ -116,6 +112,7 @@ public class KeyguardMods extends XposedModPack {
 
 	public KeyguardMods(Context context) {
 		super(context);
+		middleText = new LockscreenCustomText(this::setMiddleColor);
 	}
 
 	@Override
@@ -157,7 +154,7 @@ public class KeyguardMods extends XposedModPack {
 					if (!customCarrierTextEnabled) {
 						try {
 							callMethod(
-									getObjectField(carrierTextController, "mCarrierTextManager"),
+									getObjectField(carrierTextController, "carrierTextManager"),
 									"updateCarrierText");
 						} catch (Throwable ignored) {
 						} //probably not initiated yet
@@ -179,8 +176,6 @@ public class KeyguardMods extends XposedModPack {
 		ReflectedClass NotificationPanelViewControllerClass = ReflectedClass.of("com.android.systemui.shade.NotificationPanelViewController"); //used to launch camera
 		ReflectedClass AmbientDisplayConfigurationClass = ReflectedClass.of("android.hardware.display.AmbientDisplayConfiguration");
 		ReflectedClass DefaultShortcutsSectionClass = ReflectedClass.of("com.android.systemui.keyguard.ui.view.layout.sections.DefaultShortcutsSection");
-		ReflectedClass SmartspaceSectionClass = ReflectedClass.of("com.android.systemui.keyguard.ui.view.layout.sections.SmartspaceSection");
-		ReflectedClass DefaultNotificationStackScrollLayoutSectionClass = ReflectedClass.of("com.android.systemui.keyguard.ui.view.layout.sections.DefaultNotificationStackScrollLayoutSection");
 		ReflectedClass KeyguardIndicationControllerGoogleClass = ReflectedClass.of("com.google.android.systemui.statusbar.KeyguardIndicationControllerGoogle");
 		ReflectedClass ShortcutElementProviderClass = ReflectedClass.ofIfPossible("com.android.systemui.keyguard.ui.composable.elements.ShortcutElementProvider");
 		ReflectedClass NotificationShadeWindowViewClass = ReflectedClass.of("com.android.systemui.shade.NotificationShadeWindowView");
@@ -272,22 +267,8 @@ public class KeyguardMods extends XposedModPack {
 									mContext.getPackageName())));
 				});
 
-		DefaultNotificationStackScrollLayoutSectionClass
-				.after("applyConstraints")
-				.run(param -> {
-					Object constraintSet = param.args[0];
-
-					callMethod(constraintSet,
-							"connect",
-							mComposeKGMiddleCustomTextView.getId(),
-							ConstraintSet.BOTTOM,
-							idOf("nssl_placeholder"),
-							ConstraintSet.TOP);
-				});
-
-		SmartspaceSectionClass
-				.after("addViews")
-				.run(this::run);
+		middleText.install();
+		updateMiddleTexts();
 
 		AmbientDisplayConfigurationClass
 				.after("alwaysOnEnabled")
@@ -382,14 +363,14 @@ public class KeyguardMods extends XposedModPack {
 
 		carrierStringFormatter.registerCallback(this::setCarrierText);
 
-//		clockStringFormatter.registerCallback(this::updateMiddleTexts);
+		clockStringFormatter.registerCallback(this::updateMiddleTexts);
 
 		KeyguardStatusBarViewClass
 				.after("onFinishInflate")
 				.run(param -> applyCarrierTextLayout(param.thisObject));
 
 		KeyguardStatusBarViewClass
-				.after("updateCarrierLabelMargin")
+				.after("updateFirstStartSideItemMargin")
 				.run(param -> applyCarrierTextLayout(param.thisObject));
 
 		KeyguardStatusBarViewClass
@@ -413,10 +394,10 @@ public class KeyguardMods extends XposedModPack {
 				.run(this::compensateCarrierBatteryTranslation);
 
 		CarrierTextControllerClass
-				.after("onInit")
+				.after("onViewAttached")
 				.run(param -> {
 					carrierTextController = param.thisObject;
-					Object carrierTextCallback = getObjectField(carrierTextController, "mCarrierTextCallback");
+					Object carrierTextCallback = getObjectField(carrierTextController, "carrierTextCallback");
 					setCarrierText();
 					ReflectedClass.of(carrierTextCallback.getClass())
 							.before("updateCarrierInfo")
@@ -620,30 +601,14 @@ public class KeyguardMods extends XposedModPack {
 		}
 	}
 
-	private void createMiddleTextViews() {
-		if(mComposeKGMiddleCustomTextView == null) {
-			mComposeKGMiddleCustomTextView = new TextView(mContext);
-			mComposeKGMiddleCustomTextView.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-			mComposeKGMiddleCustomTextView.setMaxLines(2);
-			mComposeKGMiddleCustomTextView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-			mComposeKGMiddleCustomTextView.setLetterSpacing(.03f);
-			mComposeKGMiddleCustomTextView.setId(View.generateViewId());
-			mComposeKGMiddleCustomTextView.setZ(100f);
-		}
-	}
-
 	private void setMiddleColor() {
-		if(mColorExtractor != null) {
-			Object colors = callMethod(mColorExtractor, "getColors", WallpaperManager.FLAG_LOCK);
-			mSupportsDarkText = callMethod(colors, "supportsDarkText");
-		}
-		int color = (mDozing || !mSupportsDarkText) ? Color.WHITE : Color.BLACK;
-
 		try {
-			mComposeKGMiddleCustomTextView.setShadowLayer(1, 1, 1, color == Color.BLACK ? Color.TRANSPARENT : Color.BLACK); //shadow only for white color
-			mComposeKGMiddleCustomTextView.setTextColor(color);
-		}
-		catch (Throwable ignored) {}
+			if (mColorExtractor != null) {
+				Object colors = callMethod(mColorExtractor, "getColors", WallpaperManager.FLAG_LOCK);
+				mSupportsDarkText = callMethod(colors, "supportsDarkText");
+			}
+		} catch (Throwable ignored) {}
+		middleText.setColor((mDozing || !mSupportsDarkText) ? Color.WHITE : Color.BLACK);
 	}
 
 	private void setCarrierText() {
@@ -651,7 +616,7 @@ public class KeyguardMods extends XposedModPack {
 			TextView mView = getObjectField(carrierTextController, "mView");
 			mView.post(() -> {
 				try {
-					callMethod(mView.getParent(), "updateCarrierLabelMargin");
+					callMethod(mView.getParent(), "updateFirstStartSideItemMargin");
 					applyCarrierTextLayout(mView.getParent());
 				} catch (Throwable ignored) {}
 				if (customCarrierTextEnabled) {
@@ -787,44 +752,8 @@ public class KeyguardMods extends XposedModPack {
 		} catch (Throwable ignored) {}
 	}
 
-	private void updateMiddleTexts()
-	{
-		CharSequence text = null;
-		if(!KGMiddleCustomText.isEmpty())
-		{
-			text = clockStringFormatter.formatString(KGMiddleCustomText);
-		}
-
-		try {
-			setMiddleTextCompose(text);
-		} catch (Throwable ignored) {}
-	}
-
-	private void setMiddleTextCompose(CharSequence text) {
-		mKeyguardRootView.post(() -> {
-			if (text == null) {
-				mKeyguardRootView.removeView(mComposeKGMiddleCustomTextView);
-			} else {
-				ReflectionTools.reAddView(mKeyguardRootView, mComposeKGMiddleCustomTextView);
-				mComposeKGMiddleCustomTextView.setText(text);
-			}
-		});
-	}
-
-	private void run(HookHelper.RunParam param) {
-		try {
-			createMiddleTextViews();
-
-			try {
-				LinearLayout smartSpaceContainer = getObjectField(param.thisObject, "dateView");
-				mKeyguardRootView = smartSpaceContainer.getRootView().findViewById(idOf("keyguard_root_view"));
-			} catch (Throwable ignored) {
-			}
-
-			updateMiddleTexts();
-			setMiddleColor();
-		} catch (Throwable ignored) {
-		}
+	private void updateMiddleTexts() {
+		middleText.setText(KGMiddleCustomText.isEmpty() ? "" : clockStringFormatter.formatString(KGMiddleCustomText));
 	}
 
 	public static class ControlledLaunchableImageViewBackgroundDrawable extends Drawable
