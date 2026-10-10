@@ -1,7 +1,6 @@
 package sh.siava.pixelxpert.xposed.modpacks.gboard;
 
 import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
-import static sh.siava.pixelxpert.xposed.utils.reflection.XposedCompat.getObjectField;
 
 import android.content.ContentValues;
 import android.content.ContentResolver;
@@ -19,7 +18,6 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.HashSet;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -44,6 +42,10 @@ public class GboardMods extends XposedModPack {
 
 	private static volatile boolean amoledBlack;
 	private static volatile boolean clipboardHistory;
+	private static volatile boolean clipboardHistoryReady;
+	private static volatile boolean flagReaderReady;
+	private static final ThreadLocal<ClipboardReadScope> CLIPBOARD_READ_SCOPE = new ThreadLocal<>();
+	private static final String RECENT_SELECTION = "((item_type | ?) - (item_type & ?)) & ? = 0 and timestamp >= ?";
 	private static volatile boolean secureClipboard;
 	private static volatile boolean forceIncognito;
 	private static volatile boolean privacyFlags;
@@ -120,8 +122,6 @@ public class GboardMods extends XposedModPack {
 			"enable_nwp_tflite_engine", "enable_emoji_predictor_tflite_engine");
 	private static final Set<String> FAST_ACCESS_FLAGS = Set.of(
 			"enable_fast_access_bar", "keyboard_redesign_google_sans");
-	private static final Set<String> CLIPBOARD_HISTORY_FLAGS = Set.of(
-			"enable_extended_clipboard_history");
 	private static final Set<String> ALL_FLAGS = buildAllFlags();
 
 	public GboardMods(Context context) {
@@ -160,6 +160,7 @@ public class GboardMods extends XposedModPack {
 		hookClipboardResolver();
 		hookClipboardProvider(param.getClassLoader());
 		hookClipboardSizeCompatibility();
+		GboardDexResolver.resolveClipboardHooks(mContext, param.getClassLoader(), this::installClipboardHistory);
 		GboardDexResolver.resolve(mContext, param.getClassLoader(), method -> {
 			if (method != null) hookFlagReader(method);
 		});
@@ -243,13 +244,9 @@ public class GboardMods extends XposedModPack {
 		for (String candidate : candidates) {
 			try {
 				Class<?> provider = Class.forName(candidate, false, classLoader);
-				Method query = provider.getDeclaredMethod("query", Uri.class, String[].class, String.class, String[].class, String.class);
-				ReflectedClass.of(provider).before(query).run(param -> modifyClipboardQuery(param.args));
 				Method insert = provider.getDeclaredMethod("insert", Uri.class, ContentValues.class);
 				ReflectedClass.of(provider).before(insert).run(param -> {
-					if (!secureClipboard) return;
-					ContentValues values = param.getArg(1);
-					if (currentFieldSecure || (values != null && containsSensitiveClipboardText(values))) {
+					if (shouldBlockClipboardInsert(param.getArg(1))) {
 						param.setResult(null);
 					}
 				});
@@ -258,74 +255,112 @@ public class GboardMods extends XposedModPack {
 		}
 	}
 
+	private void installClipboardHistory(GboardDexResolver.ClipboardHooks hooks) {
+		if (hooks == null) {
+			log("PixelXpert Gboard：剪贴板增强入口未匹配，保持原生历史行为");
+			return;
+		}
+		try {
+			Method loader = hooks.getLoader();
+			// 调用者去优化，防止原生五组上限中的 HashSet.size 已被 ART 内联。
+			if (!ReflectedClass.deoptimize(loader)) {
+				log("PixelXpert Gboard：历史读取方法无法去优化，保持原生行为");
+				return;
+			}
+			ReflectedClass.of(loader.getDeclaringClass()).intercept(loader, chain -> {
+				if (!clipboardHistoryActive()) return chain.proceed();
+				try (ClipboardReadScope ignored = new ClipboardReadScope(clipboardSize, clipboardDuration)) {
+					return chain.proceed();
+				}
+			});
+			Method retention = hooks.getRetention();
+			ReflectedClass.of(retention.getDeclaringClass()).before(retention).run(param -> {
+				if (clipboardHistoryActive()) {
+					// 显示与实际过期清理共用此方法；不再只改查询、却仍按原生一小时删除。
+					param.setResult(clipboardDuration < 0 ? Long.MAX_VALUE : clipboardDuration);
+				}
+			});
+			clipboardHistoryReady = true;
+		} catch (Throwable error) {
+			log("PixelXpert Gboard：剪贴板增强安装失败，保持原生行为", error);
+		}
+	}
+
 	private void hookClipboardResolver() throws NoSuchMethodException {
 		Method query = ContentResolver.class.getDeclaredMethod("query", Uri.class, String[].class,
 				String.class, String[].class, String.class);
 		ReflectedClass.of(ContentResolver.class).before(query).run(param -> {
-			if (!clipboardHistory) return;
 			Uri uri = param.getArg(0);
-			String authority = uri == null ? null : uri.getAuthority();
-			// Gboard's clipboard provider authority is always "<packageName>.clipboard_content";
-			// without this gate any query mentioning "timestamp" was rewritten (LIMIT/time window),
-			// corrupting unrelated Gboard internals and intermittently hiding fresh clips.
-			if (authority == null || !authority.endsWith(".clipboard_content")) return;
-			String[] projection = param.getArg(1);
-			String selection = param.getArg(2);
-			String[] selectionArgs = param.getArg(3);
-			String sortOrder = param.getArg(4);
-			if (!isClipboardQuery(projection, selection, sortOrder)) return;
+			if (uri == null || !(mContext.getPackageName() + ".clipboard_content").equals(uri.getAuthority())
+					|| !"/clips".equals(uri.getPath())) return;
 			modifyClipboardQuery(param.args);
-			if (sortOrder == null || !sortOrder.matches("(?i).*\\blimit\\s+\\d+.*")) {
-				param.args[4] = (sortOrder == null ? "" : sortOrder + " ") + "LIMIT " + clipboardSize;
-			}
 		});
 	}
 
 	private void hookClipboardSizeCompatibility() throws NoSuchMethodException {
 		Method size = HashSet.class.getDeclaredMethod("size");
 		ReflectedClass.of(HashSet.class).before(size).run(param -> {
-			if (!clipboardHistory) return;
-			HashSet<?> set = param.getThisObject();
-			Object first = set.isEmpty() ? null : set.iterator().next();
-			if (first == null || !"j$.time.Instant".equals(first.getClass().getName())) return;
-			Object backingMap = getObjectField(set, "map");
-			// Only intervene when the real count exceeds the visible cap. Lying about small
-			// sets (e.g. 1 pinned clip reported as 5) desynchronized Gboard's internal
-			// merge/trim decisions and could hide freshly copied entries.
-			if (backingMap instanceof Map<?, ?> map && map.size() > clipboardSize) {
-				param.setResult(5);
-			}
+			Integer count = reportedClipboardSize(param.getThisObject());
+			if (count != null) param.setResult(count);
 		});
 	}
 
-	private static boolean isClipboardQuery(String[] projection, String selection, String sortOrder) {
-		String query = (selection == null ? "" : selection) + " " + (sortOrder == null ? "" : sortOrder);
-		if (query.matches("(?i).*timestamp.*")) return true;
-		if (projection != null) {
-			for (String column : projection) {
-				if (column != null && column.matches("(?i).*timestamp.*")) return true;
-			}
+	private static boolean clipboardHistoryActive() {
+		return clipboardHistory && clipboardHistoryReady && flagReaderReady;
+	}
+
+	private static Integer reportedClipboardSize(HashSet<?> set) {
+		ClipboardReadScope scope = CLIPBOARD_READ_SCOPE.get();
+		if (scope == null || set.isEmpty()) return null;
+		if (scope.timestamps == null) {
+			Object first = set.iterator().next();
+			if (first == null || !"j$.time.Instant".equals(first.getClass().getName())) return null;
+			scope.timestamps = set;
 		}
-		return false;
+		if (scope.timestamps != set) return null;
+		int actual = 0;
+		// 不读取 HashSet 的私有 map，也不递归调用已经 Hook 的 size。
+		for (Object ignored : set) {
+			if (++actual > scope.limit) return 6;
+		}
+		return Math.min(actual, 5);
 	}
 
 	private static void modifyClipboardQuery(Object[] args) {
-		if (!clipboardHistory || args.length < 5) return;
-		String selection = args[2] instanceof String ? (String) args[2] : "";
-		String[] selectionArgs = args[3] instanceof String[] ? (String[]) args[3] : null;
-		String sortOrder = args[4] instanceof String ? (String) args[4] : null;
-		int timestampIndex = selection.toLowerCase(Locale.ROOT).indexOf("timestamp >= ?");
-		if (timestampIndex >= 0 && selectionArgs != null) {
-			int argumentIndex = 0;
-			for (int i = 0; i < timestampIndex; i++) if (selection.charAt(i) == '?') argumentIndex++;
-			if (argumentIndex < selectionArgs.length) {
-				long after = clipboardDuration < 0 ? 0 : System.currentTimeMillis() - clipboardDuration;
-				selectionArgs[argumentIndex] = Long.toString(after);
-				args[3] = selectionArgs;
-			}
+		ClipboardReadScope scope = CLIPBOARD_READ_SCOPE.get();
+		if (scope == null || args.length < 5 || args[1] != null
+				|| !(args[2] instanceof String selection) || !(args[3] instanceof String[] values)
+				|| !(args[4] instanceof String order)) return;
+		if (!RECENT_SELECTION.equals(selection.trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " "))
+				|| values.length != 4 || !"0".equals(values[0]) || !"0".equals(values[1]) || !"3".equals(values[2])
+				|| !order.matches("(?i)timestamp\\s+DESC\\s+limit\\s+\\d+")) return;
+		// 只改已解析 loader 的最近未固定记录；固定、主剪贴板回退和清理查询完全保留。
+		String[] copied = values.clone();
+		copied[3] = Long.toString(scope.duration < 0 ? 0 : Math.max(0, System.currentTimeMillis() - scope.duration));
+		args[3] = copied;
+		args[4] = "timestamp DESC limit " + scope.limit;
+	}
+
+	private static boolean shouldBlockClipboardInsert(ContentValues values) {
+		return secureClipboard && (currentFieldSecure || (values != null && containsSensitiveClipboardText(values)));
+	}
+
+	private static final class ClipboardReadScope implements AutoCloseable {
+		private final ClipboardReadScope previous = CLIPBOARD_READ_SCOPE.get();
+		private final int limit;
+		private final long duration;
+		private HashSet<?> timestamps;
+
+		private ClipboardReadScope(int limit, long duration) {
+			this.limit = limit;
+			this.duration = duration;
+			CLIPBOARD_READ_SCOPE.set(this);
 		}
-		if (sortOrder != null && sortOrder.matches("(?i).*\\blimit\\s+\\d+.*")) {
-			args[4] = sortOrder.replaceFirst("(?i)limit\\s+\\d+", "limit " + clipboardSize);
+
+		@Override
+		public void close() {
+			if (previous == null) CLIPBOARD_READ_SCOPE.remove();
+			else CLIPBOARD_READ_SCOPE.set(previous);
 		}
 	}
 
@@ -349,12 +384,12 @@ public class GboardMods extends XposedModPack {
 	}
 
 	private static void hookFlagReader(Method method) {
-		ReflectedClass.of(method.getDeclaringClass()).before(method).run(param -> {
+		flagReaderReady = !ReflectedClass.of(method.getDeclaringClass()).before(method).run(param -> {
 			String name = findKnownFlagName(param.thisObject);
 			if (name == null) return;
 			Object override = evaluateFlag(name);
 			if (override != null) param.setResult(override);
-		});
+		}).isEmpty();
 	}
 
 	private static String findKnownFlagName(Object flag) {
@@ -374,12 +409,10 @@ public class GboardMods extends XposedModPack {
 	private static Object evaluateFlag(String name) {
 		Object enabled = stringFlag(name) ? "*" : Boolean.TRUE;
 		Object disabled = stringFlag(name) ? "" : Boolean.FALSE;
-		if (clipboardHistory
-				&& (name.equals("enable_clipboard_entity_extraction") || name.equals("enable_clipboard_query_refactoring"))) {
+		// 只有读取作用域、组数限制、实际 TTL 都装好后才选择已适配的旧读取入口。
+		if (clipboardHistoryActive() && name.equals("enable_clipboard_query_refactoring")) {
 			return disabled;
 		}
-		// Without this, Gboard prunes clips after ~1 hour regardless of the visible-day window.
-		if (clipboardHistory && CLIPBOARD_HISTORY_FLAGS.contains(name)) return enabled;
 		if (privacyFlags && PRIVACY_TRUE_FLAGS.contains(name)) return enabled;
 		if (privacyFlags && PRIVACY_FALSE_FLAGS.contains(name)) return disabled;
 		if (aiFeatures && AI_FLAGS.contains(name)) return enabled;
@@ -412,8 +445,7 @@ public class GboardMods extends XposedModPack {
 	private static Set<String> buildAllFlags() {
 		return combine(AI_FLAGS, GRAMMAR_FLAGS, MULTILINGUAL_FLAGS, FLOATING_FLAGS, EMOJI_FLAGS,
 				ACCESS_POINT_FLAGS, METERED_FLAGS, PRIVACY_TRUE_FLAGS, PRIVACY_FALSE_FLAGS, INLINE_FLAGS,
-				PROACTIVE_EMOJI_FLAGS, CLIPBOARD_CHIP_FLAGS, TFLITE_FLAGS, FAST_ACCESS_FLAGS,
-				CLIPBOARD_HISTORY_FLAGS);
+				PROACTIVE_EMOJI_FLAGS, CLIPBOARD_CHIP_FLAGS, TFLITE_FLAGS, FAST_ACCESS_FLAGS);
 	}
 
 	private static int parseInt(String value, int fallback, int minimum, int maximum) {
