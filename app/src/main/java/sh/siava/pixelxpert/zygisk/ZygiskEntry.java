@@ -189,7 +189,8 @@ public class ZygiskEntry {
 			Window window = activity.getWindow();
 			if (window == null) return;
 			View decor = window.peekDecorView() != null ? window.getDecorView() : null;
-			if (decor == null) return;
+			// 多窗口下可能同时有多个 resumed Activity；只滚动实际有焦点的窗口。
+			if (decor == null || !decor.hasWindowFocus() || !decor.isShown()) return;
 			scrollToTopRecursive(decor);
 		} catch (Throwable ignored) {}
 	}
@@ -212,12 +213,7 @@ public class ZygiskEntry {
 		}
 	}
 
-	/**
-	 * Reflective scroll, ordered by MIUI's preference: RecyclerView list
-	 * position APIs first, legacy AbsListView selection, then generic
-	 * full-scroll fallbacks. Each attempt is independent - the first one
-	 * that exists and does not throw wins.
-	 */
+	/** 按控件实际签名回顶，不把无参调用装成一个 Object[] 参数。 */
 	private static void scrollViewToTop(View view) {
 		String[] methodNames = {
 				"smoothScrollToPosition", "scrollToPosition", "setSelection",
@@ -225,26 +221,32 @@ public class ZygiskEntry {
 		};
 		for (String name : methodNames) {
 			try {
-				java.lang.reflect.Method target = null;
-				for (java.lang.reflect.Method m : view.getClass().getMethods()) {
-					if (m.getName().equals(name)) {
-						Class<?>[] p = m.getParameterTypes();
-						if (p.length == 1 && (p[0] == int.class)) { target = m; break; }
-						if (p.length == 0) { target = m; break; }
-					}
+				Class<?>[] types;
+				Object[] args;
+				switch (name) {
+					case "scrollToTop":
+						types = new Class<?>[0];
+						args = new Object[0];
+						break;
+					case "pageUp":
+						types = new Class<?>[]{boolean.class};
+						args = new Object[]{true};
+						break;
+					case "smoothScrollTo":
+						types = new Class<?>[]{int.class, int.class};
+						args = new Object[]{view.getScrollX(), 0};
+						break;
+					default:
+						types = new Class<?>[]{int.class};
+						args = new Object[]{"fullScroll".equals(name) ? View.FOCUS_UP : 0};
 				}
-				if (target == null) continue;
-				Class<?>[] p = target.getParameterTypes();
-				//fullScroll expects a focus direction: View.FOCUS_UP (33). 0 is
-				//neither FOCUS_UP nor FOCUS_DOWN and scrolls nothing at all.
-				int arg = "fullScroll".equals(name) ? View.FOCUS_UP : 0;
-				target.invoke(view, p.length == 1 ? arg : new Object[0]);
-				return;
+				Object result = view.getClass().getMethod(name, types).invoke(view, args);
+				if (!Boolean.FALSE.equals(result)) return;
 			} catch (Throwable ignored) {}
 		}
-		// Last resort: nudge generic scrollers (ScrollView#scrollTo style).
 		try {
-			view.scrollTo(0, 0);
+			// 只复位纵向位置，不让回顶同时跳回横向起点。
+			view.scrollTo(view.getScrollX(), 0);
 		} catch (Throwable ignored) {}
 	}
 }
