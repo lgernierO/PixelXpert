@@ -12,6 +12,8 @@ import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 import android.content.Context;
 import android.graphics.Point;
 import android.view.MotionEvent;
+import android.view.InputDevice;
+import sh.siava.pixelxpert.xposed.utils.reflection.HookHelper;
 
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
@@ -29,6 +31,7 @@ public class GestureNavbarManager extends XposedModPack {
 	float initialBackX = 0;
 
 	Object EdgeBackGestureHandler;
+	private boolean modernWarningLogged;
 	//endregion
 
 	public GestureNavbarManager(Context context) {
@@ -48,6 +51,12 @@ public class GestureNavbarManager extends XposedModPack {
 
 	@Override
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
+		ReflectedClass displayHandler = ReflectedClass.ofIfPossible(
+				"com.android.systemui.navigationbar.gestural.DisplayBackGestureHandlerImpl");
+		if (displayHandler.getClazz() != null) {
+			displayHandler.before("onMotionEvent").run(this::filterDisplayGesture);
+			return;
+		}
 		ReflectedClass EdgeBackGestureHandlerClass = ReflectedClass.ofIfPossible("com.android.systemui.navigationbar.gestural.EdgeBackGestureHandler");
 		ReflectedClass NavigationBarEdgePanelClass = ReflectedClass.ofIfPossible("com.android.systemui.navigationbar.gestural.NavigationBarEdgePanel");
 		ReflectedClass BackPanelControllerClass = ReflectedClass.of("com.android.systemui.navigationbar.gestural.BackPanelController");
@@ -92,6 +101,30 @@ public class GestureNavbarManager extends XposedModPack {
 				});
 		//endregion
 
+	}
+
+	private void filterDisplayGesture(HookHelper.RunParam param) {
+		if (param.args.length == 0 || !(param.args[0] instanceof MotionEvent event)
+				|| event.getActionMasked() != ACTION_DOWN) return;
+		if (leftEnabled && rightEnabled && backGestureHeightFractionLeft == 1f
+				&& backGestureHeightFractionRight == 1f) return;
+		if (event.isFromSource(InputDevice.SOURCE_MOUSE) || event.isFromSource(InputDevice.SOURCE_TOUCHPAD)) return;
+		try {
+			// 新版状态属于当前屏幕的 handler，不再属于 EdgeBackGestureHandler 配置对象。
+			Point size = (Point) getObjectField(param.thisObject, "displaySize");
+			if (size == null || size.x <= 0 || size.y <= 0) return;
+			float bottom = getFloatField(param.thisObject, "bottomGestureHeight");
+			if (notWithinInsets(event.getX(), event.getY(), size, bottom)) {
+				setObjectField(param.thisObject, "allowGesture", false);
+				setObjectField(param.thisObject, "logGesture", false);
+				param.setResult(null);
+			}
+		} catch (Throwable error) {
+			if (!modernWarningLogged) {
+				modernWarningLogged = true;
+				log("PixelXpert 返回手势：无法读取当前屏幕状态，保留系统行为", error);
+			}
+		}
 	}
 
 	//region Back gesture
