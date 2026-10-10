@@ -4,6 +4,8 @@ import static sh.siava.pixelxpert.xposed.XPrefs.Xprefs;
 
 import android.content.Context;
 
+import java.lang.reflect.Method;
+
 import io.github.libxposed.api.XposedModuleInterface;
 import sh.siava.pixelxpert.xposed.XposedModPack;
 import sh.siava.pixelxpert.xposed.annotations.FrameworkModPack;
@@ -82,6 +84,19 @@ public class NlpRedirector extends XposedModPack {
 		if (HOOK_INSTALLED) return;
 		try {
 			ReflectedClass Supplier = ReflectedClass.of(SUPPLIER_CLASS);
+
+			//createFromConfig lives in com.android.server (services.jar) which is part of the
+			//AOT-compiled boot image. The proxy location providers are built very early in
+			//system_server boot by compiled code, so the compiled copy of createFromConfig runs
+			//and the plain Xposed "before" hook never fires - that is why the redirect was
+			//basically ineffective. Deoptimize every createFromConfig overload first (same
+			//pattern PackageManager/GboardMods use for boot-image framework methods) so the hook
+			//is honoured from the first provider bind.
+			for (Method method : Supplier.getClazz().getDeclaredMethods()) {
+				if (method.getName().equals("createFromConfig")) {
+					ReflectedClass.deoptimize(method);
+				}
+			}
 
 			Supplier.before("createFromConfig")
 					.run(param -> {
