@@ -11,13 +11,15 @@ import static sh.siava.pixelxpert.xposed.utils.SystemUtils.idOf;
 
 import android.app.AlertDialog;
 import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+import sh.siava.pixelxpert.xposed.utils.toolkit.Logger;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import java.lang.reflect.InvocationHandler;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.List;
@@ -27,6 +29,16 @@ import sh.siava.pixelxpert.xposed.utils.reflection.ReflectedClass;
 import sh.siava.pixelxpert.xposed.utils.toolkit.ResourceTools;
 
 public abstract class AlertSlider implements SystemUtils.ChangeListener {
+	private static volatile Object systemDialogFactory;
+	private static boolean dialogFactoryHooked;
+
+	/** 由使用滑块的 ModPack 在 SystemUI 初始化期间调用，不能等到长按时才装钩。 */
+	public static synchronized void initializeDialogFactory() {
+		if (dialogFactoryHooked) return;
+		ReflectedClass factory = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.phone.SystemUIDialog$Factory");
+		dialogFactoryHooked = !factory.afterConstruction().run(param -> systemDialogFactory = param.thisObject).isEmpty();
+	}
+
 	private final Context context;
 	private final float initialValue;
 	private final float minValue;
@@ -46,10 +58,17 @@ public abstract class AlertSlider implements SystemUtils.ChangeListener {
 	}
 
 	public void show() throws Throwable {
-		if(sliderDialog == null)
-		{
-			createSliderDialog();
+		if (Looper.myLooper() != Looper.getMainLooper()) {
+			new Handler(Looper.getMainLooper()).post(() -> {
+				try {
+					show();
+				} catch (Throwable error) {
+					Logger.log("PixelXpert 滑块弹窗创建失败", error);
+				}
+			});
+			return;
 		}
+		if (sliderDialog == null) createSliderDialog();
 		sliderDialog.show();
 	}
 
@@ -99,28 +118,24 @@ public abstract class AlertSlider implements SystemUtils.ChangeListener {
 		eventCallback.onCreate(this);
 	}
 
-	private AlertDialog getSystemUIDialog() throws IllegalAccessException, InstantiationException, InvocationTargetException, NoSuchMethodException {
-		try
-		{
-			ReflectedClass SystemUIDialogClass = ReflectedClass.of("com.android.systemui.statusbar.phone.SystemUIDialog");
-			return (AlertDialog) SystemUIDialogClass.getClazz().getConstructor(Context.class).newInstance(context);
+	private AlertDialog getSystemUIDialog() throws ReflectiveOperationException {
+		Object factory = systemDialogFactory;
+		if (factory != null) {
+			// 使用系统已注入的 DismissReceiver.Factory、BlurInteractor 等依赖，
+			// 不根据构造参数位置猜类型，也不把 BroadcastDispatcher 冒充 Factory。
+			return (AlertDialog) callMethod(factory, "create", context);
 		}
-		catch (Throwable ignored){}
-
-		ReflectedClass SystemUIDialogFactoryClass = ReflectedClass.of("com.android.systemui.statusbar.phone.SystemUIDialog$Factory");
-
-		Object factory = SystemUIDialogFactoryClass.getClazz().getConstructors()[0].newInstance(context,
-				SystemUIDependencyProvider.get("com.android.systemui.statusbar.phone.SystemUIDialogManager"),
-				SystemUIDependencyProvider.get("com.android.systemui.broadcast.BroadcastDispatcher"),
-				SystemUIDependencyProvider.get("com.android.systemui.animation.DialogTransitionAnimator"),
-				null);
-
-		return  (AlertDialog) callMethod(factory, "create");
+		ReflectedClass dialog = ReflectedClass.of("com.android.systemui.statusbar.phone.SystemUIDialog");
+		return (AlertDialog) dialog.getClazz().getConstructor(Context.class).newInstance(context);
 	}
 
 	/** @noinspection SameParameterValue*/
 	public void setSliderCurrentValue(float currentValue) {
-		callMethod(mSlider, "setValue", currentValue);
+		if (Looper.myLooper() != Looper.getMainLooper()) {
+			new Handler(Looper.getMainLooper()).post(() -> setSliderCurrentValue(currentValue));
+			return;
+		}
+		if (mSlider != null) callMethod(mSlider, "setValue", currentValue);
 	}
 
 	private void setSliderListeners(Object slider, SliderEventCallback sliderEventCallback) {
