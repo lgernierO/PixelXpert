@@ -72,6 +72,11 @@ public class ReflectedClass
 		return defaultXposedInterface;
 	}
 
+	/** 供需要 try/finally 作用域的真实调用使用，避免 before/after 遇到异常时遗留状态。 */
+	public XposedInterface.HookHandle intercept(Method method, XposedInterface.Hooker hooker) {
+		return defaultXposedInterface.hook(method).intercept(hooker);
+	}
+
 	public static boolean deoptimize(Executable executable) {
 		return defaultXposedInterface != null && defaultXposedInterface.deoptimize(executable);
 	}
