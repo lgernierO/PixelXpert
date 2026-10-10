@@ -35,7 +35,7 @@ import sh.siava.pixelxpert.R;
 import sh.siava.pixelxpert.di.StateManagerEntryPoint;
 import sh.siava.pixelxpert.service.tileServices.SleepOnSurfaceTileService;
 import sh.siava.pixelxpert.ui.misc.StateManager;
-import sh.siava.pixelxpert.ui.preferences.MaterialPrimarySwitchPreference;
+import sh.siava.rangesliderpreference.RangeSliderPreference;
 
 public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragmentCompat {
 
@@ -201,15 +201,18 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 			PreferenceHelper.setupAllPreferences(this.getPreferenceScreen());
 			return;
 		}
-		//targeted refresh: only the changed preference (plus its direct children when it is a
-		//master switch) needs re-evaluating. Walking the whole screen from a change listener
-		//made androidx notifyHierarchyChanged() rebind every visible row on each slider tick -
-		//visible as a flicker when a parent switch toggles, and it re-binds the slider row
-		//mid-drag so its summary lagged behind the thumb
+		//targeted refresh: re-evaluate the changed preference, then its dependent rows. A switch,
+		//checkbox or dropdown anywhere on the page can gate the visibility/enabled state of other
+		//rows (see PreferenceHelper.isVisible/isEnabled - e.g. carrierTextMod->carrierTextValue,
+		//NetworkStatsStartBase->NetworkStatsStart*, networkOnSBEnabled->networkTraffic*), so those
+		//sub-options have to be refreshed in place instead of only after the user leaves and
+		//re-enters the section. Sliders are the one exception: a drag fires this listener on every
+		//tick and a hierarchy walk mid-drag rebinds the slider row (resetting the thumb to the last
+		//saved value), so a slider change refreshes only itself.
 		Preference changed = PreferenceHelper.findPreference(getPreferenceScreen(), key);
 		if (changed == null) return;
 		PreferenceHelper.setupPreference(changed);
-		if (changed instanceof MaterialPrimarySwitchPreference) {
+		if (!(changed instanceof RangeSliderPreference)) {
 			PreferenceHelper.setupChildren(getPreferenceScreen());
 		}
 	}
@@ -220,4 +223,3 @@ public abstract class ControlledPreferenceFragmentCompat extends PreferenceFragm
 		PreferenceHelper.setupMainSwitches(this.getPreferenceScreen());
 	}
 }
-
