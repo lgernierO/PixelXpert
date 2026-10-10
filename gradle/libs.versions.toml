@@ -41,7 +41,7 @@ ksp = "2.3.10"
 hilt = "2.60.1"
 lsposed-api = "102.0.0"
 lsposed-service = "102.0.0"
-dexkit = "2.2.0"
+dexkit = "2.3.0"
 
 [libraries]
 androidx-activity = { module = "androidx.activity:activity", version.ref = "activity" }
