@@ -20,6 +20,7 @@ import android.os.UserHandle;
 import android.view.Display;
 import android.view.WindowManager;
 
+import java.lang.reflect.Method;
 import java.util.List;
 
 import io.github.libxposed.api.XposedModuleInterface;
@@ -127,11 +128,27 @@ public class PhoneWindowManager extends XposedModPack {
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		// Android CANARY schedules the Power + Volume Down screenshot after this
 		// dedicated chord timeout, multiplying it by 2.5 while keyguard is showing.
-		ReflectedClass.ofIfPossible("com.android.server.input.KeyGestureController")
-				.after("getScreenshotChordLongPressDelay")
-				.run(param -> {
-					if (removeScreenshotDelay) param.setResult(0L);
-				});
+		// getScreenshotChordLongPressDelay() is a tiny hot method that ART AOT-compiles
+		// and inlines, so the first chord after boot runs the compiled copy and bypasses
+		// the hook entirely - that is why the very first screenshot was still slow while
+		// every later one was fast. Deoptimize the method first (same pattern as
+		// PackageManager/GboardMods) so the hook is honoured from the first invocation.
+		ReflectedClass KeyGestureControllerClass =
+				ReflectedClass.ofIfPossible("com.android.server.input.KeyGestureController");
+		if (KeyGestureControllerClass.getClazz() != null) {
+			try {
+				Method screenshotDelayMethod = KeyGestureControllerClass.getClazz()
+						.getDeclaredMethod("getScreenshotChordLongPressDelay");
+				ReflectedClass.deoptimize(screenshotDelayMethod);
+			} catch (Throwable ignored) {
+				//no matching method on this build: fall back to the plain hook below
+			}
+			KeyGestureControllerClass
+					.after("getScreenshotChordLongPressDelay")
+					.run(param -> {
+						if (removeScreenshotDelay) param.setResult(0L);
+					});
+		}
 
 		//noinspection unchecked
 		userHandleList = (List<UserHandle>) callMethod(SystemUtils.UserManager(), "getProfiles", true);
@@ -195,6 +212,7 @@ public class PhoneWindowManager extends XposedModPack {
 			Intent broadcast = new Intent();
 			broadcast.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
 			broadcast.setAction(Constants.ACTION_PROFILE_SWITCH_AVAILABLE);
+			broadcast.setPackage(Constants.SYSTEM_UI_PACKAGE);
 			broadcast.putExtra("available", isAvailable);
 			mContext.sendBroadcast(broadcast);
 		}).start();
