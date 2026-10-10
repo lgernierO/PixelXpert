@@ -53,6 +53,7 @@ import androidx.annotation.Nullable;
 
 import org.objenesis.ObjenesisHelper;
 
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -164,12 +165,18 @@ public class StatusbarMods extends XposedModPack {
 	private FrameLayout mPhoneStatusbarView;
 	private boolean mModernStatusBar;
 	/*
-	 * The CANARY Home clock is a restartable Compose function. Its restart
-	 * lambda calls ClockKt directly, so a ThreadLocal scoped to Lambda7 is lost
-	 * after the first composition. Keep the exact HOME ClockViewModel captured
-	 * by Lambda7 instead and recognize both first render and recompositions.
+	 * ClockKt's restart lambda bypasses the start-side lambda. Identify HOME by
+	 * the typed result of rememberViewModel("HomeStatusBar.Clock"), not an R8
+	 * lambda number or a call-stack flag. Other displays/QS keep their own VMs.
+	 * Retain the enclosing restart scope weakly: when the native Clock call is
+	 * suppressed it cannot register its own restart callback for preference changes.
 	 */
+	private static final String CANARY_HOME_CLOCK_KEY = "HomeStatusBar.Clock";
 	private Object mCanaryHomeClockViewModel;
+	private WeakReference<Object> mCanaryHomeClockScope = new WeakReference<>(null);
+	private boolean mCanaryClockHooksReady;
+	private boolean mCanaryClockSuppressionRequested;
+	private boolean mCanaryClockHookWarningLogged;
 	/*
 	 * The controller is retained only to read its verified mShowing field while
 	 * a keyguard-state callback is in flight. CANARY can compose HOME before our
@@ -515,18 +522,18 @@ public class StatusbarMods extends XposedModPack {
 	public void onPackageLoaded(XposedModuleInterface.PackageReadyParam PRParam) throws Throwable {
 		IntentFilter filter = new IntentFilter();
 		filter.addAction(Constants.ACTION_PROFILE_SWITCH_AVAILABLE);
-		mContext.registerReceiver(mAppProfileSwitchReceiver, filter, Context.RECEIVER_EXPORTED);
+		// 内部分身状态只由 system_server 发出；限制发送权限，避免普通应用伪造。
+		mContext.registerReceiver(mAppProfileSwitchReceiver, filter, "android.permission.MANAGE_USERS", null, Context.RECEIVER_EXPORTED);
 
 		//region needed classes
 		ReflectedClass ClockClass = ReflectedClass.of("com.android.systemui.statusbar.policy.Clock");
 		ReflectedClass StatusBarRootFactoryClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootFactory");
-		/*
-		 * Verified against 系统界面_CANARY.APK:
-		 * StatusBarRootKt$$ExternalSyntheticLambda0 invokes ClockViewModel/ClockKt
-		 * and calls setVisibility(GONE) on the XML Clock during recomposition.
-		 */
-		ReflectedClass StatusBarRootComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda0");
-		ReflectedClass StatusBarClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda7");
+		/* Supplied CANARY: Lambda1.f$2 is the XML Clock. Lambda0 has no f$2,
+		 * and Lambda7.f$1 is a Rect, NOT a ClockViewModel. Use this verified
+		 * boundary only for eager view binding; HOME identity comes from its key. */
+		ReflectedClass StatusBarRootComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.statusbar.pipeline.shared.ui.composable.StatusBarRootKt$$ExternalSyntheticLambda1");
+		ReflectedClass SysUiViewModelClass = ReflectedClass.ofIfPossible("com.android.systemui.lifecycle.SysUiViewModelKt");
+		ReflectedClass ClockViewModelClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.viewmodel.ClockViewModel");
 		ReflectedClass ClockComposableClass = ReflectedClass.ofIfPossible("com.android.systemui.clock.ui.composable.ClockKt");
 		mModernStatusBar = StatusBarRootFactoryClass.getClazz() != null;
 		ReflectedClass PhoneStatusBarViewClass = ReflectedClass.of("com.android.systemui.statusbar.phone.PhoneStatusBarView");
@@ -811,71 +818,59 @@ public class StatusbarMods extends XposedModPack {
 					refreshClockRenderer();
 				});
 
-		/*
-		 * StatusBarRoot's start-side lambda is the CANARY-specific composition
-		 * boundary. Its f$2 field is the exact XML Clock captured by the target
-		 * APK. Bind and place our overlay before Lambda7 invokes ClockKt so the
-		 * first HOME composition cannot flash a duplicate or leave a blank clock.
-		 */
+		/* Bind the compatibility Clock before the start-side composition creates
+		 * HomeStatusBar.Clock. Never move/hide the whole Compose host: it also
+		 * owns notification icons and other start-side content. */
 		StatusBarRootComposableClass
 				.before("invoke")
 				.run(param -> {
 					try {
 						Object clock = getObjectField(param.thisObject, "f$2");
-						if (clock instanceof View) bindPhoneStatusbarView((View) clock);
-					} catch (Throwable ignored) {}
-					/* Lambda0 can be invoked as an unchanged Compose skip. Only create
-					 * a view when the user really enabled a custom clock. */
+						if (ClockClass.getClazz().isInstance(clock) && clock instanceof View) {
+							bindPhoneStatusbarView((View) clock);
+						}
+					} catch (Throwable t) {
+						warnCanaryClockHook("Cannot bind the CANARY start-side Clock", t);
+					}
 					if (shouldRenderCanaryOverlay()) refreshClockRenderer();
 				});
 
-
-		StatusBarClockComposableClass
-				.before("invoke")
+		boolean canCaptureHomeClock = !SysUiViewModelClass
+				.after("rememberViewModel")
 				.run(param -> {
-					/* f$1 is the verified HomeStatusBar.Clock ClockViewModel in
-					 * 系统界面_CANARY.APK. Store identity rather than a call-stack flag:
-					 * ClockKt's restart lambda bypasses Lambda7 on recomposition.
-					 *
-					 * Lambda7 is immediately upstream of the first ClockKt call. Prepare
-					 * the native overlay here, not from a later keyguard post(), so its
-					 * first HOME frame has one renderer instead of stock Text plus ours. */
-					try {
-						Object clockViewModel = getObjectField(param.thisObject, "f$1");
-						if (clockViewModel != null) {
-							mCanaryHomeClockViewModel = clockViewModel;
-							if (shouldRenderCanaryOverlay()) refreshClockRenderer();
-						}
-					} catch (Throwable ignored) {}
-				});
+					if (!mModernStatusBar || param.args.length < 4
+							|| !CANARY_HOME_CLOCK_KEY.equals(param.args[0])) return;
+					Object clockViewModel = param.getResult();
+					if (ClockViewModelClass.getClazz() == null
+							|| !ClockViewModelClass.getClazz().isInstance(clockViewModel)) return;
+					captureCanaryHomeClock(clockViewModel, param.args[3]);
+				}).isEmpty();
 
-		ClockComposableClass
-				.before(Pattern.compile(".*Clock.*"))
+		boolean canSuppressHomeClock = !ClockComposableClass
+				.before("Clock")
 				.run(param -> {
-					if (isCanaryHomeClock(param) && shouldReplaceCanaryHomeClock()) {
-						/*
-						 * Do not make native-clock suppression depend on the overlay already
-						 * being attached. On unlock CANARY can invoke ClockKt before the
-						 * keyguard after-hook posts the overlay; allowing this one call is
-						 * what leaves a second stock clock visible until a later recomposition.
-						 *
-						 * If HOME is already live, Lambda7 prepared the overlay above. If the
-						 * keyguard is still visible, leave the overlay detached but still
-						 * suppress this HOME-only Compose Text; notifyKeyguardState(false)
-						 * attaches it as soon as HOME is allowed to be shown.
-						 */
-						if (shouldRenderCanaryOverlay()) refreshClockRenderer();
-						/* Return before the Compose Text node is emitted. This removes
-						 * the stock clock from both rendering and measurement, so centred
-						 * notification/icon layout has no transparent blank separator. */
+					if (!isCanaryHomeClock(param)) return;
+					if (shouldRenderCanaryOverlay()) refreshClockRenderer();
+					if (shouldSuppressCanaryHomeClock()) {
+						/* Omit only HOME's native Text, including its measured width.
+						 * The enclosing scope captured above survives this skipped call,
+						 * so a preference reset can render the original Clock again.
+						 * During keyguard, HOME stays suppressed until its overlay may
+						 * attach. If placement fails on HOME, keep the stock clock. */
 						param.setResult(null);
 					}
-				});
+				}).isEmpty();
+
+		mCanaryClockHooksReady = canCaptureHomeClock && canSuppressHomeClock
+				&& ClockViewModelClass.getClazz() != null;
+		if (mModernStatusBar && !mCanaryClockHooksReady) {
+			warnCanaryClockHook("CANARY clock hooks unavailable; keeping the stock clock", null);
+		}
 
 		ClockComposableClass
-				.after(Pattern.compile(".*Clock.*")).run(param -> {
-					/* A HOME ClockKt call that was allowed through means stock Compose
-					 * has completed its hand-over; only then retire an old overlay. */
+				.after("Clock").run(param -> {
+					/* Retire the native overlay only after the matching HOME call has
+					 * completed its hand-over. QS/lockscreen calls cannot remove it. */
 					if (isCanaryHomeClock(param) && !shouldRenderCanaryOverlay()) {
 						removeCanaryClockOverlay();
 					}
@@ -985,6 +980,8 @@ public class StatusbarMods extends XposedModPack {
 			/* A recreated status bar owns a new notification/Compose hierarchy.
 			 * Never place an overlay into one of the old display's wrappers. */
 			mCanaryHomeClockViewModel = null;
+			mCanaryHomeClockScope.clear();
+			mCanaryClockSuppressionRequested = false;
 			mNotificationIconContainer = null;
 			mNotificationContainerContainer = null;
 			mLeftVerticalSplitContainer = null;
@@ -1011,7 +1008,7 @@ public class StatusbarMods extends XposedModPack {
 
 	private boolean shouldUseCanaryOverlay() {
 		/* ClockKt's matching HOME invocation is identified by the retained
-		 * ClockViewModel, not by the Lambda7 call stack. Do not wait for the
+		 * ClockViewModel, not by a synthetic lambda call stack. Do not wait for the
 		 * native overlay's attach callback: it is already a child of the current
 		 * PhoneStatusBarView and must replace the very first Compose frame. */
 		return shouldRenderCanaryOverlay()
@@ -1022,9 +1019,59 @@ public class StatusbarMods extends XposedModPack {
 
 	private boolean isCanaryHomeClock(sh.siava.pixelxpert.xposed.utils.reflection.HookHelper.RunParam param) {
 		if (param == null || param.args.length == 0 || mCanaryHomeClockViewModel == null) return false;
-		/* ClockKt has one ClockViewModel parameter. The same identity is retained
-		 * by its generated restart lambda, unlike the Lambda7 stack frame. */
+		/* ClockKt has one ClockViewModel parameter. Its generated restart lambda
+		 * retains the same identity even when rememberViewModel is not called. */
 		return param.args[0] == mCanaryHomeClockViewModel;
+	}
+
+	private void captureCanaryHomeClock(Object clockViewModel, Object composer) {
+		try {
+			/* Same operations as this APK's ComposablesKt.getCurrentRecomposeScope:
+			 * rememberViewModel has no restart group of its own, so this is the
+			 * surviving start-side scope, not the Clock scope we may remove. */
+			Object scope = callMethod(composer, "getRecomposeScope");
+			if (scope == null) throw new IllegalStateException("Missing HOME recompose scope");
+			callMethod(composer, "recordUsed", scope);
+			mCanaryHomeClockViewModel = clockViewModel;
+			mCanaryHomeClockScope = new WeakReference<>(scope);
+			refreshClockRenderer();
+		} catch (Throwable t) {
+			// Do not show an unpaired replacement if the new HOME cannot be identified.
+			if (mCanaryHomeClockViewModel != clockViewModel) {
+				mCanaryHomeClockViewModel = null;
+				mCanaryHomeClockScope.clear();
+				removeCanaryClockOverlay();
+			}
+			warnCanaryClockHook("Cannot capture the CANARY HOME clock", t);
+		}
+	}
+
+	private boolean shouldSuppressCanaryHomeClock() {
+		return shouldReplaceCanaryHomeClock()
+				&& (isCanaryKeyguardShowing() || shouldUseCanaryOverlay());
+	}
+
+	private void requestCanaryClockRecomposition() {
+		boolean suppress = shouldSuppressCanaryHomeClock();
+		if (suppress == mCanaryClockSuppressionRequested) return;
+		Object scope = mCanaryHomeClockScope.get();
+		if (scope == null) return;
+		try {
+			/* R8 inlined RecomposeScope.invalidate() in this APK. The remaining
+			 * invalidateForResult(null) entry invalidates the enclosing scope even
+			 * when no native Clock restart group was emitted. A View.invalidate()
+			 * or requestLayout() alone cannot notify Compose of preference changes. */
+			callMethod(scope, "invalidateForResult", (Object) null);
+			mCanaryClockSuppressionRequested = suppress;
+		} catch (Throwable t) {
+			warnCanaryClockHook("Cannot recompose the CANARY HOME clock", t);
+		}
+	}
+
+	private void warnCanaryClockHook(String message, Throwable error) {
+		if (mCanaryClockHookWarningLogged) return;
+		mCanaryClockHookWarningLogged = true;
+		log(message, error);
 	}
 
 	private boolean shouldReplaceCanaryHomeClock() {
@@ -1033,7 +1080,7 @@ public class StatusbarMods extends XposedModPack {
 		 * resets every option return to the exact CANARY default. Keyguard state is
 		 * deliberately not part of this decision: ClockKt belongs to HOME and must
 		 * never get one stock frame while the custom renderer is being handed over. */
-		return mModernStatusBar
+		return mModernStatusBar && mCanaryClockHooksReady && mCanaryHomeClockViewModel != null
 				&& (clockPosition != POSITION_LEFT
 				|| notificationAreaMultiRow
 				|| mShowSeconds
@@ -1074,6 +1121,7 @@ public class StatusbarMods extends XposedModPack {
 			if (mCanaryClockOverlay != null && mCanaryClockOverlay.getParent() != null) {
 				refreshCanaryClockText();
 			}
+			requestCanaryClockRecomposition();
 			return;
 		}
 
@@ -1082,6 +1130,7 @@ public class StatusbarMods extends XposedModPack {
 		placeCanaryClockOverlay();
 		mCanaryClockOverlay.setVisibility(VISIBLE);
 		refreshCanaryClockText();
+		requestCanaryClockRecomposition();
 		if (mCanaryClockOverlay.isAttachedToWindow()) {
 			scheduleCanaryClockTick();
 		} else {
