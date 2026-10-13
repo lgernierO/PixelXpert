@@ -71,6 +71,7 @@ public class KeyguardMods extends XposedModPack {
 	private static boolean customCarrierTextEnabled = false;
 	private static String customCarrierText = "";
 	private static Object carrierTextController;
+	private static volatile Object carrierTranslationCallback;
 	private static volatile boolean carrierBatteryAnimationPending;
 	private static volatile boolean carrierBatteryAnimationActive;
 
@@ -383,7 +384,14 @@ public class KeyguardMods extends XposedModPack {
 
 		StatusBarSystemEventDefaultAnimatorClass
 				.before("onSystemEventAnimationBegin")
-				.run(param -> beginCarrierBatteryAnimation());
+				.run(param -> {
+					captureCarrierTranslationCallback(param.thisObject);
+					beginCarrierBatteryAnimation();
+				});
+
+		StatusBarSystemEventDefaultAnimatorClass
+				.before("onSystemEventAnimationFinish")
+				.run(param -> captureCarrierTranslationCallback(param.thisObject));
 
 		StatusBarSystemEventDefaultAnimatorClass
 				.after("onSystemEventAnimationFinish")
@@ -690,16 +698,26 @@ public class KeyguardMods extends XposedModPack {
 	}
 
 	private void compensateCarrierBatteryTranslation(HookHelper.RunParam param) {
+		if (!carrierBatteryAnimationActive || !customCarrierTextEnabled
+				|| param.thisObject != carrierTranslationCallback
+				|| param.args.length != 1 || !(param.args[0] instanceof Float parentTranslationX)) {
+			return;
+		}
 		try {
-			if (!carrierBatteryAnimationActive || !customCarrierTextEnabled
-					|| getIntField(param.thisObject, "$r8$classId") != 1
-					|| param.args.length != 1 || !(param.args[0] instanceof Float parentTranslationX)) {
-				return;
-			}
 			TextView carrierLabel = getObjectField(carrierTextController, "mView");
 			carrierLabel.setTranslationX(-parentTranslationX);
 		} catch (Throwable ignored) {
 			clearCarrierAnimationTranslation();
+		}
+	}
+
+	//StatusBarSystemEventDefaultAnimator 持有两个同类型的合成 lambda：onAlphaChanged 与 onTranslationXChanged，
+	//两者 classId 相同。以实例身份判定，只补偿负责 KeyguardStatusBarView 位移的那一个。
+	private static void captureCarrierTranslationCallback(Object animator) {
+		try {
+			carrierTranslationCallback = getObjectField(animator, "onTranslationXChanged");
+		} catch (Throwable ignored) {
+			carrierTranslationCallback = null;
 		}
 	}
 
