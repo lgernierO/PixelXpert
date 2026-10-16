@@ -58,6 +58,13 @@
 
 		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
 			android:defaultValue="false"
+			android:key="GboardClipboardTextLimit"
+			android:summary="@string/gboard_clipboard_text_limit_summary"
+			android:title="@string/gboard_clipboard_text_limit_title"
+			app:iconSpaceReserved="false" />
+
+		<sh.siava.pixelxpert.ui.preferences.MaterialSwitchPreference
+			android:defaultValue="false"
 			android:key="GboardSecureClipboard"
 			android:summary="@string/gboard_secure_clipboard_summary"
 			android:title="@string/gboard_secure_clipboard_title"

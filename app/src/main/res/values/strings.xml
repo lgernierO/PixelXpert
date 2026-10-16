@@ -627,6 +627,8 @@
     <string name="gboard_clipboard_size_summary">Allowed range: 5 to 100</string>
     <string name="gboard_clipboard_days_title">Visible history in days</string>
     <string name="gboard_clipboard_days_summary">Allowed range: 0 to 3650; 0 requests all retained entries</string>
+    <string name="gboard_clipboard_text_limit_title">Remove clipboard text length limit</string>
+    <string name="gboard_clipboard_text_limit_summary">Raise the per-entry text cap to the maximum allowed by Gboard, so long copies are stored and pasted in full; restart Gboard after changing</string>
     <string name="gboard_secure_clipboard_title">Keep sensitive text out of Gboard history</string>
     <string name="gboard_secure_clipboard_summary">Block entries copied from password fields and likely verification codes, PINs, or long account numbers</string>
     <string name="gboard_clipboard_chips_title">Clipboard action chips</string>

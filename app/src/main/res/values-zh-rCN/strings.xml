@@ -598,6 +598,8 @@
     <string name="gboard_clipboard_days_summary">允许范围：0 到 3650；0 表示请求全部仍保留的条目</string>
 
     <string name="gboard_clipboard_days_title">可见历史天数</string>
+    <string name="gboard_clipboard_text_limit_summary">将单条文本上限提高到 Gboard 允许的最大值，长文本可完整存入并完整粘贴；修改后请重启 Gboard</string>
+    <string name="gboard_clipboard_text_limit_title">去除剪贴板文本长度限制</string>
 
     <string name="gboard_clipboard_history_summary">修改 Gboard 请求的条目数量和时间范围；已被 Gboard 删除的旧条目无法恢复</string>
 

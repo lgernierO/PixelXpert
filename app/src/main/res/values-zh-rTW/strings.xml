@@ -592,6 +592,8 @@
     <string name="gboard_clipboard_days_summary">允許範圍：0 至 3650；設為 0 會要求所有仍保留的項目</string>
 
     <string name="gboard_clipboard_days_title">可顯示的記錄天數</string>
+    <string name="gboard_clipboard_text_limit_summary">將單筆文字上限提高到 Gboard 允許的最大值，長文字可完整存入並完整貼上；修改後請重新啟動 Gboard</string>
+    <string name="gboard_clipboard_text_limit_title">移除剪貼簿文字長度限制</string>
 
     <string name="gboard_clipboard_history_summary">變更 Gboard 要求的項目數量與保留時間；Gboard 已刪除的舊項目無法復原</string>
 

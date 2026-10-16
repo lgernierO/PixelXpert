@@ -40,9 +40,14 @@ public class GboardMods extends XposedModPack {
 	private static final Pattern SHORT_CODE = Pattern.compile("(?<!\\d)\\d{4,8}(?!\\d)");
 	private static final Pattern LONG_NUMBER = Pattern.compile("(?<!\\d)\\d{12,19}(?!\\d)");
 
+	private static final String CLIPBOARD_TEXT_LIMIT_FLAG = "text_clip_item_char_limit";
+	// 采集与编辑都会对取值调用 Long.intValue()；超过 int 范围会得到负数并重新落回原生截断分支。
+	private static final long CLIPBOARD_UNLIMITED_TEXT = Integer.MAX_VALUE;
+
 	private static volatile boolean amoledBlack;
 	private static volatile boolean clipboardHistory;
 	private static volatile boolean clipboardHistoryReady;
+	private static volatile boolean clipboardUnlimitedText;
 	private static volatile boolean flagReaderReady;
 	private static final ThreadLocal<ClipboardReadScope> CLIPBOARD_READ_SCOPE = new ThreadLocal<>();
 	private static final String RECENT_SELECTION = "((item_type | ?) - (item_type & ?)) & ? = 0 and timestamp >= ?";
@@ -151,6 +156,7 @@ public class GboardMods extends XposedModPack {
 		clipboardSize = parseInt(Xprefs.getString("GboardClipboardSize", "10"), 10, 5, 100);
 		long days = parseInt(Xprefs.getString("GboardClipboardDays", "3"), 3, 0, 3650);
 		clipboardDuration = days == 0 ? -1 : days * 24L * 60 * 60 * 1000;
+		clipboardUnlimitedText = Xprefs.getBoolean("GboardClipboardTextLimit", false);
 	}
 
 	@Override
@@ -413,6 +419,10 @@ public class GboardMods extends XposedModPack {
 		if (clipboardHistoryActive() && name.equals("enable_clipboard_query_refactoring")) {
 			return disabled;
 		}
+		// 该上限同时决定采集写入长度与编辑框长度过滤器，取值由调用方 Long.intValue() 收敛。
+		if (clipboardUnlimitedText && CLIPBOARD_TEXT_LIMIT_FLAG.equals(name)) {
+			return CLIPBOARD_UNLIMITED_TEXT;
+		}
 		if (privacyFlags && PRIVACY_TRUE_FLAGS.contains(name)) return enabled;
 		if (privacyFlags && PRIVACY_FALSE_FLAGS.contains(name)) return disabled;
 		if (aiFeatures && AI_FLAGS.contains(name)) return enabled;
@@ -439,6 +449,7 @@ public class GboardMods extends XposedModPack {
 		java.util.HashSet<String> result = new java.util.HashSet<>();
 		for (Set<String> set : sets) result.addAll(set);
 		result.add("enable_clipboard_query_refactoring");
+		result.add(CLIPBOARD_TEXT_LIMIT_FLAG);
 		return Set.copyOf(result);
 	}
 
