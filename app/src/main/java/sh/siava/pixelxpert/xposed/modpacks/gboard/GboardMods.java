@@ -382,11 +382,12 @@ public class GboardMods extends XposedModPack {
 
 	private static boolean isSensitiveText(String text) {
 		String normalized = text.toLowerCase(Locale.ROOT);
-		return SHORT_CODE.matcher(normalized).find()
-				|| LONG_NUMBER.matcher(normalized).find()
+		if (LONG_NUMBER.matcher(normalized).find()
 				|| normalized.contains("otp") || normalized.contains("one-time")
 				|| normalized.contains("verification code") || normalized.contains("password")
-				|| normalized.contains("passcode") || normalized.contains("pin code");
+				|| normalized.contains("passcode") || normalized.contains("pin code")) return true;
+		// 整条内容就是一个短码（验证码常被单独复制）才算敏感；句子中出现的年份、价格、版本号不再拦截。
+		return SHORT_CODE.matcher(normalized.trim()).matches();
 	}
 
 	private static void hookFlagReader(Method method) {
